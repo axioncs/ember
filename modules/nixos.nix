@@ -28,9 +28,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # LD_AUDIT is the injection contract: the client dlopen's the library at
-    # startup, before any of its own code runs. No wrapper script, no patching
-    # of files inside the Steam install directory.
+    # extraEnv lands in the FHS profile, which the container init sources.
     programs.steam.package = cfg.steamPackage.override {
       extraEnv = {
         LD_AUDIT = "${cfg.package}/lib/ember/ember-core.so";

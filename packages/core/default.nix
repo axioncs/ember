@@ -46,9 +46,8 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
-  # The audit library is dlopen'd by the Steam client inside its FHS sandbox.
-  # Pin its own dependencies by absolute path so the runtime's libcurl/dbus/
-  # libstdc++ cannot shadow the ones it was linked against.
+  # Pin dependencies by absolute path: the client's FHS sandbox would otherwise
+  # shadow libcurl/dbus/libstdc++ with older runtime copies.
   postFixup = ''
     patchelf --force-rpath --set-rpath ${
       lib.makeLibraryPath [
