@@ -25,9 +25,18 @@ in
       defaultText = lib.literalExpression "pkgs.steam";
       description = "Steam package to wrap with the ember audit library.";
     };
+
+    cli = lib.mkOption {
+      type = lib.types.package;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.cli;
+      defaultText = lib.literalExpression "ember.packages.\${system}.cli";
+      description = "ember command line interface.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ cfg.cli ];
+
     # extraEnv lands in the FHS profile, which the container init sources.
     programs.steam.package = cfg.steamPackage.override {
       extraEnv = {
