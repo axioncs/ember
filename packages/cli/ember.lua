@@ -242,6 +242,130 @@ local function cmdStatus()
 	return 0
 end
 
+local function cmdDoctor()
+	local fails, warns = 0, 0
+	local function line(label, value, state)
+		local tag = ""
+		if state == "ok" then tag = "ok"
+		elseif state == "warn" then tag = "WARN"; warns = warns + 1
+		elseif state == "fail" then tag = "FAIL"; fails = fails + 1
+		elseif state == "info" then tag = "" end
+		print(string.format("  %-17s %-46s %s", label, value, tag))
+	end
+
+	print("ember doctor\n")
+
+	local root = steamRoot()
+	if isDir(root .. "/config") then
+		line("steam root", root, "ok")
+	else
+		line("steam root", "not found", "fail")
+	end
+
+	local pids = {}
+	for pid in sh("pgrep -f 'steamrt64/stea[m]' 2>/dev/null"):gmatch("%d+") do
+		table.insert(pids, pid)
+	end
+
+	local corePath = ""
+	if #pids == 0 then
+		line("client", "not running", "fail")
+		line("core", "-", "fail")
+	else
+		line("client", string.format("running (%d process(es))", #pids), "ok")
+		for _, pid in ipairs(pids) do
+			local hit = sh("grep -o '/nix/store/[a-z0-9]*-ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1")
+			hit = trim(hit)
+			if hit ~= "" then
+				corePath = hit
+				break
+			end
+		end
+		if corePath ~= "" then
+			line("core", corePath:match("([^/]+/[^/]+/[^/]+)$") or corePath, "ok")
+		else
+			line("core", "not mapped into the client", "fail")
+		end
+	end
+
+	if isFile(configDir() .. "/.boot-in-progress") then
+		line("boot marker", "present - last start died, next start runs vanilla", "warn")
+	else
+		line("boot marker", "absent", "ok")
+	end
+
+	local config = readFile(configDir() .. "/config.yaml")
+	if config then
+		local lang = config:match("\nDepotLanguages:%s*\"?([^\"\n]*)")
+		if lang == nil or trim(lang) == "" then
+			line("config", "ok, depot language follows the client", "ok")
+		else
+			line("config", "ok, depot languages [" .. trim(lang) .. "]", "ok")
+		end
+	else
+		line("config", configDir() .. "/config.yaml missing", "warn")
+	end
+
+	local scripts = listFiles(stplugDir(), ".lua")
+	local apps, keys, pins = {}, {}, {}
+	for _, name in ipairs(scripts) do
+		local sc = scanScript(stplugDir() .. "/" .. name)
+		for id in pairs(sc.apps) do apps[id] = true end
+		for id in pairs(sc.keys) do keys[id] = true end
+		for id in pairs(sc.pins) do pins[id] = true end
+	end
+	line("stplug-in", string.format("%d script(s), %d app(s), %d key(s), %d pin(s)",
+		#scripts, count(apps), count(keys), count(pins)), #scripts > 0 and "ok" or "info")
+
+	local stored = listFiles(storeDir(), ".manifest")
+	local cached = listFiles(depotCacheDir(), ".manifest")
+	local cachedSet = {}
+	for _, name in ipairs(cached) do cachedSet[name] = true end
+	local missing = 0
+	for _, name in ipairs(stored) do
+		if not cachedSet[name] then missing = missing + 1 end
+	end
+	line("manifest store", string.format("%d file(s), %d not in depotcache", #stored, missing),
+		missing == 0 and "ok" or "warn")
+	line("depotcache", string.format("%d manifest(s)", #cached), "info")
+
+	local log = sh("tr -d '\\0' < " .. home() .. "/.ember.log 2>/dev/null")
+	if log == "" then
+		line("log", "empty or unreadable", "info")
+	else
+		if log:find("Failed to find all patterns", 1, true) then
+			local names = {}
+			for name in log:gmatch("Pattern not found: ([^\n]+)") do
+				table.insert(names, name)
+			end
+			line("patterns", "FAILED: " .. (#names > 0 and table.concat(names, ", ") or "see log"), "fail")
+		else
+			line("patterns", "resolved", "ok")
+		end
+
+		if log:find("did not finish; running vanilla", 1, true) then
+			line("last start", "boot guard tripped - ran vanilla", "warn")
+		end
+		if log:find("Captured SteamID", 1, true) then
+			line("ownership", "SteamID captured", "ok")
+		else
+			line("ownership", "no SteamID captured yet (not logged in?)", "warn")
+		end
+	end
+
+	print("")
+	if fails > 0 then
+		print(string.format("%d failure(s), %d warning(s)", fails, warns))
+		return 1
+	end
+	if warns > 0 then
+		print(string.format("%d warning(s)", warns))
+		return 0
+	end
+	print("all checks passed")
+	return 0
+end
+
 local function usage()
 	print([[
 ember — Steam library tooling
@@ -249,6 +373,7 @@ ember — Steam library tooling
   ember import <file.lua|file.zip>   import a script or a manifest archive
   ember list                         show imported scripts and stored manifests
   ember status                       show client, store and depotcache state
+  ember doctor                       check the whole stack and say what is wrong
 ]])
 end
 
@@ -259,6 +384,8 @@ elseif command == "list" then
 	os.exit(cmdList())
 elseif command == "status" then
 	os.exit(cmdStatus())
+elseif command == "doctor" then
+	os.exit(cmdDoctor())
 else
 	usage()
 	os.exit(command == nil and 0 or 1)
