@@ -278,6 +278,35 @@ speech packs are now language-filtered too. 2224070 is dropped by platform (its
 
 The user confirmed the install dialog and the download are correct.
 
+### Round 6 change: size fallback, empty and foreign depots
+
+Checked how the old stack selected depots, expecting a language policy to copy. It
+has none: `rg -i language src/feats/*.cpp` in slsteam-moon returns only
+`baselanguages` as metadata to skip. Moon never filtered depots — it provisioned
+appinfo and let Steam's own planner apply `oslist`/`language`. Ember fills the
+vector directly, so it has to replicate those filters itself, and already does more
+than moon did.
+
+What moon did have, and ember lacked:
+
+- `emptydepot.hpp`: a size-0 depot's stub manifest trips
+  `Assert(!m_strName.IsEmpty())` in `contentmanifest.cpp` and SEGV-crashes the
+  client while reconfiguring (documented live: Dave the Diver, depot 4394810).
+- `usabledepot.hpp`: a depots map holding only metadata or virtual DLC entries has
+  no installable content.
+
+Three filters added to `synthesiseDepotPlan`, all conservative:
+
+1. **Size fallback** — when the script's `setManifestid` carries no size, read
+   `depots/<id>/manifests/public/size` from appinfo. Two-argument scripts now get an
+   accurate install total instead of 0.
+2. **Provably-empty depots dropped** — only when the size is *known* to be 0. An
+   unknown size is kept, so this cannot regress to a 0 B plan.
+3. **`depotfromapp` depots dropped** when they point at another app.
+
+Log line extended: `... %zu dropped for platform, %zu empty, %zu provided by
+another app`.
+
 ## Remaining work
 
 1. **Depot selection.** Done: platform (`oslist`), language (`DepotLanguages`), and
