@@ -292,7 +292,9 @@ local function cmdDoctor()
 	else
 		line("client", string.format("running (%d process(es))", #pids), "ok")
 		for _, pid in ipairs(pids) do
-			local hit = sh("grep -o '/nix/store/[a-z0-9]*-ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1")
+			-- Any path ending in ember-core: the NixOS module uses a store path,
+			-- the installer uses ~/.local/share/ember.
+			local hit = sh("grep -o '/[^ ]*ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1")
 			hit = trim(hit)
 			if hit ~= "" then
 				corePath = hit
@@ -302,7 +304,19 @@ local function cmdDoctor()
 		if corePath ~= "" then
 			line("core", corePath:match("([^/]+/[^/]+/[^/]+)$") or corePath, "ok")
 		else
-			line("core", "not mapped into the client", "fail")
+			-- Distinguish "never asked to load" from "asked and failed".
+			local audit = ""
+			for _, pid in ipairs(pids) do
+				audit = trim(sh("tr '\\0' '\\n' < /proc/" .. pid .. "/environ 2>/dev/null | sed -n 's/^LD_AUDIT=//p' | head -1"))
+				if audit ~= "" then
+					break
+				end
+			end
+			if audit == "" then
+				line("core", "client started without ember - launch it with steam-ember", "fail")
+			else
+				line("core", "LD_AUDIT set but not loaded - see the terminal output", "fail")
+			end
 		end
 	end
 
@@ -369,7 +383,7 @@ local function cmdDoctor()
 		line("", "incomplete: " .. table.concat(missingByApp, ", "), "info")
 	end
 
-	local log = sh("tr -d '\\0' < " .. home() .. "/.ember.log 2>/dev/null")
+	local log = sh("cat " .. home() .. "/.ember.log 2>/dev/null | tr -d '\\0'")
 	if log == "" then
 		line("log", "empty or unreadable", "info")
 	else
