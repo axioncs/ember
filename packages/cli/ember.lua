@@ -86,7 +86,7 @@ local function scanScript(path)
 				elseif #parts == 3 then
 					out.keys[parts[1]] = true
 				end
-			elseif name == "setmanifestid" and #parts == 2 then
+			elseif name == "setmanifestid" and (#parts == 2 or #parts == 3) then
 				out.pins[parts[1]] = true
 			end
 		end
