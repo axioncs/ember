@@ -77,7 +77,7 @@ local function scanScript(path)
 			name = name:lower()
 			local parts = {}
 			for part in (args .. ","):gmatch("([^,]*),") do
-				table.insert(parts, trim(part):gsub('"', ""))
+				table.insert(parts, (trim(part):gsub('"', "")))
 			end
 			if name == "addappid" then
 				if #parts == 1 then
