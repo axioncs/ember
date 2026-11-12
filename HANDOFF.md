@@ -61,9 +61,14 @@ bypasses the deployed system and is faster to iterate.
 - **Ownership SteamID**: `hkClientUser_GetSteamId` ignores the anonymous sentinel.
 - **Depot plan**: `src/feats/apps.cpp`. `CUserAppManager::BuildDepotDependency`
   returns an empty vector for unowned apps, so the plan is synthesised from the
-  stplug-in pins, filtered by appinfo `oslist` and `DepotLanguages`, and handed
-  back with `success || synthesised`. Installs download and complete. Details and
-  the round-by-round history are below.
+  stplug-in pins, filtered by appinfo `oslist`, `language` and `baselanguages`,
+  split into `depots`/`sharedDepots` by `sharedinstall`, and handed back with
+  `success || synthesised`. Installs download and complete. Details and the
+  round-by-round history are below.
+  `BIsSubscribedApp` is also hooked (returns true for added apps) so Steam's own
+  planner can build the plan where it is willing to — the log says
+  `planner produced` when that happens and `synthesised` when it falls back. On
+  the Nov-2025 client the planner still bails, so synthesis is the live path.
 
 ## Depot plan (solved)
 

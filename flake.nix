@@ -52,5 +52,19 @@
       );
 
       nixosModules.default = import ./modules/nixos.nix { inherit self; };
+
+      checks = forAllSystems (pkgs: {
+        stplugin = pkgs.stdenv.mkDerivation {
+          pname = "ember-test-stplugin";
+          version = "0.1.0";
+          src = ember-core;
+          nativeBuildInputs = [
+            pkgs.gnumake
+            pkgs.gcc
+          ];
+          buildPhase = "make test-stplugin";
+          installPhase = "mkdir -p $out && touch $out/passed";
+        };
+      });
     };
 }

@@ -12,10 +12,12 @@ REPO="${EMBER_REPO:-https://github.com/axioncs/ember-core}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ember"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DESKTOP=0
+UNINSTALL=0
 
 for arg in "$@"; do
 	case "$arg" in
 		--desktop) DESKTOP=1 ;;
+		--uninstall) UNINSTALL=1 ;;
 		-h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) printf 'ember: unknown argument: %s\n' "$arg" >&2; exit 2 ;;
 	esac
@@ -42,6 +44,21 @@ EOF
 		exit 1
 		;;
 esac
+
+if [ "$UNINSTALL" = 1 ]; then
+	say "removing ember"
+	rm -f "$DATA_DIR/ember-core.so" "$BIN_DIR/steam-ember"
+	rmdir "$DATA_DIR" 2>/dev/null || true
+
+	entry="$HOME/.local/share/applications/steam.desktop"
+	if [ -f "$entry" ] && grep -q 'LD_AUDIT=.*ember-core' "$entry"; then
+		rm -f "$entry"
+		say "removed the desktop override"
+	fi
+
+	say "done"
+	exit 0
+fi
 
 case "${ID:-} ${ID_LIKE:-}" in
 	*arch*)   FAMILY=arch ;;
