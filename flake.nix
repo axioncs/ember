@@ -22,10 +22,23 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
-      packages = forAllSystems (pkgs: {
-        core = pkgs.callPackage ./packages/core { src = ember-core; };
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.core;
-      });
+      packages = forAllSystems (
+        pkgs:
+        let
+          core = pkgs.callPackage ./packages/core { src = ember-core; };
+        in
+        {
+          inherit core;
+
+          # Steam with the audit library injected. Usable directly for testing
+          # without a system rebuild: nix run .#steam
+          steam = pkgs.steam.override {
+            extraEnv.LD_AUDIT = "${core}/lib/ember/ember-core.so";
+          };
+
+          default = core;
+        }
+      );
 
       nixosModules.default = import ./modules/nixos.nix { inherit self; };
     };
