@@ -233,6 +233,30 @@ so English audio needs no speech depot at all.
 Expected for 1091500 with `english,japanese`: 66.4 + 4.9 (JP voice) + 24.9 + 1.9
 (PL JP voice) + 1.8 + 0.1 ≈ **100 GB**, 8 depots.
 
+### Round 4 result: 145 GB — the DLC's macOS half survived
+
+Log said `10 of 47 depot(s) localised, 9 dropped for language, 12 dropped for
+platform` → 26 depots kept, 158 GB of manifest size (the dialog shows ~92% of
+that, which is why 318 GB read as 296 and 158 GB reads as 145).
+
+The 26 included `2224089` (24.5 GB) and `2224071-2224080` (19.6 GB) — the macOS
+half of Phantom Liberty. Cause: **a DLC's depots are described in the DLC's own
+appinfo**, so `getAppData(1091500, "depots/2224089/config/oslist")` returns
+nothing, "cannot tell" keeps the depot, and the platform filter never sees it.
+That is also why only 10 depots were "localised": the base app's appinfo only
+describes the base app's own depots.
+
+### Round 5 change: DLC appinfo fallback + plan logging
+
+- the depot config lookup now falls back to each app id in
+  `extended/listofdlc` (verified present in the appinfo schema), so DLC depots get
+  their real `oslist` and `language`.
+- `Depot plan: app %u keeps <ids>` is logged once per distinct plan, because
+  DEBUG is stripped from release builds and there was no way to see the list.
+
+Expected now: 1091501 + 1091508 + 2060310 + 228988 + 2138330 + 2138335 + 2224070
+= 7 depots, 100.0 GB of manifest size (~92 GB in the dialog).
+
 ## Remaining work
 
 1. **Depot selection, rest of it.** Platform and language are done. `dlcappid` is
