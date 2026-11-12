@@ -81,23 +81,106 @@ static bool hkUserAppManager_BuildDepotDependency(
 
 `appId` is available but not passed to `Apps::buildDepotDependency`.
 
-### Plan (own implementation, do not copy other projects)
+### Plan — implemented in ember-core 0d72525
 
-1. Pass `appId` into `Apps::buildDepotDependency`.
-2. If `depots->size == 0` and `g_config.isAddedAppId(appId)`, synthesise entries
-   from data already imported: for each pin of that app, one `DepotInfo_t` with
-   `appId`, `depotId`, `manifestId`.
-3. Grow the `CUtlVector` safely — Steam frees it later, so the memory must come
-   from a compatible allocator.
+`appId` now reaches `Apps::buildDepotDependency`. When `depots->size == 0` and
+`g_config.isAddedAppId(appId)`, `synthesiseDepotPlan()` rebuilds the plan from the
+stplug-in pins: one `DepotInfo_t` per depot the app's own script pins to a
+manifest, blacklist/override loop unchanged afterwards.
 
-### Unknowns to resolve first
+Supporting change in the importer: it now keeps the app↔depot association it
+previously discarded (`Import_t::depotsByApp`, deduped, file order) plus the size
+from the three-argument `setManifestid`. `StPlugin::depotPinsFor(appId)` returns
+it. Depots with no manifest pin are dropped — the plan asserts a valid manifest
+id and Steam denies manifest requests for unowned depots.
 
-- `DepotInfo_t` layout and `CUtlVector<T>` / `CUtlMemory<T>` layout. The types are
-  used in `hooks.hpp` but their definitions were not yet located (`rg 'DepotInfo_t'`).
-- Allocator: `steamclient.so` exports **no** `Plat_*` or `CUtlMemory*` symbols
-  (`nm -D` checked). Valve's `CUtlMemory` on Linux uses libc `realloc`/`free`, so
-  `malloc`+copy or `realloc` may work, but this is unverified. A crash here is a
-  hard crash in the client, so test on the smallest surface possible.
+### Unknown 1 — DepotInfo_t / CUtlVector layout: RESOLVED from the binary
+
+Pattern `CUserAppManager::BuildDepotDependency` resolves to `0x1079640` in the
+Nov-2025 `steamrt64/steamclient.so` (single match). Read out of its own code:
+
+```
+1079ce6:  ecx = [vector+0x10]      ; m_Size
+1079cf1:  shl $5, rdx              ; stride 0x20 == sizeof(DepotInfo_t)
+1079d30:  eax = [vector+0x8]       ; m_nAllocationCount
+1079d47:  [vector+0x10] = size+1
+```
+
+So `CUtlVector<T> = { T* base@0x0, i32 alloc@0x8, i32 growSize@0xC, i32 size@0x10 }`
+(0x18 with padding) — exactly what `src/sdk/CUtl.hpp` already had.
+
+`DepotInfo_t` is 0x20 bytes, rebuilt from the reset loop at `0x107a480`
+(`movups` 0x8..0x17, `movq` 0x0, `movl` 0x18, `mov` word 0x1C, `movb` 0x1E —
+0x1F never touched = padding):
+
+| off | meaning | evidence |
+|---|---|---|
+| 0x00 | depotId | `cmp (%rax),%ebp` walking the vector with depot ids |
+| 0x04 | appId | the app id argument, set before the append |
+| 0x08 | manifestId (`m_ulManifestID`) | `cmp %rbx,0x8(%rax)`; assert string `pExistingDepotInfo->m_ulManifestID == depotInfo.m_ulManifestID` |
+| 0x10 | unknown | every client-built entry leaves it 0 |
+| 0x18 | unknown (u32) | from the temp the append copies |
+| 0x1C,0x1D,0x1E | three bytes, separate flags | 0x1C set in one path, 0x1D set when a depot is matched, 0x1E from a predicate |
+
+The old header claimed `size@0x10` + `lcsRequired@0x1C`, which does not survive
+that evidence; `0x10` is left name-neutral and unused. ember writes only
+depotId/appId/manifestId and zeroes the rest — a state the client itself builds.
+
+Growth semantics (`CUtlMemory::Grow` at `0x1070870`): `Grow(mem, deficit)` →
+`newAlloc = ComputeNewAllocation(alloc, growSize, alloc+deficit, 0x20)` (align to
+a `growSize` multiple when nonzero, else geometric), written to `m_nAllocationCount`
+*before* the realloc, then the caller sets `m_Size`.
+
+### Unknown 2 — allocator: RESOLVED, use tier0 `Plat_Alloc`/`Plat_Realloc`
+
+`CUtlMemory::Grow` allocates through `g_pMemAllocSteam`:
+
+```
+10708a1: rdx = &g_pMemAllocSteam ; rdi = [rdx] ; r10 = [rdi]   ; IMemAlloc*
+10708ce: call *0x30(%r10)   ; Realloc(this, ptr, bytes, ...)  when base != 0
+107094e: call *0x28(%r10)   ; Alloc(this, bytes, ...)         when base == 0
+```
+
+`steamclient.so` imports `g_pMemAllocSteam` as `UND` (GLOB_DAT at 0x32d3660), so
+both modules share tier0's single `IMemAlloc`; and `Plat_Alloc`/`Plat_Realloc`/
+`Plat_Free` in `libtier0_s.so` are `call *0x10`/`*0x18`/`jmp *0x20` on that same
+object. Probed out of process (tier0 dlopened, `MALLOC_CHECK_=3`): `Plat_Alloc(64)`
+returns a normal glibc chunk (`malloc_usable_size` = 72), and `Plat_Free`/libc
+`free` accept each other's pointers. So the buffer ember hands over is freed
+correctly whether the vector dies through `IMemAlloc::Free` or bare `free`.
+
+Verified build: `nix build .#core` after the bump; strings in the .so show the new
+`Depot plan:` lines.
+
+### Next test (one round)
+
+Restart Steam, then install an added app (1091500 is the biggest: 47 depots).
+
+```fish
+rg -n 'stplug-in:|Depot plan:' ~/.ember.log | tail
+tail -20 ~/.local/share/Steam/logs/content_log.txt
+```
+
+Expected, computed against the five scripts on disk:
+
+```
+stplug-in: 5 file(s), 46 app id(s) (+46), 128 depot key(s), 123 manifest pin(s) (+123), 125 depot(s) planned over 5 app(s)
+Depot plan: synthesised 47 depot(s) for unowned app 1091500
+```
+
+Per app: 1091500→47, 203160→65, 1245620→9, 1850570→3, 1222140→1. Then
+`content_log.txt` must stop saying `0 mounted depots` for that app.
+
+- No `Depot plan:` line at all → the hook never ran for that app; check
+  `rg 'BuildDepotDependency'` (DEBUG is stripped in release, so expect nothing)
+  and confirm the plan hook resolved (`rg 'Hooks placed'`).
+- `plan stays empty` → the app's script has no pins; importer problem, not plan.
+- `0 mounted depots` survives with `synthesised N` logged → the plan is fine and
+  the manifests are the problem (check every pinned `<depot>_<gid>.manifest` in
+  depotcache).
+- `0 B` in the UI but the download runs → the plan is right; `DepotInfo_t+0x10`
+  is then the size field after all, and it is currently written as 0.
+
 
 ## Findings worth not re-deriving
 
@@ -126,6 +209,10 @@ static bool hkUserAppManager_BuildDepotDependency(
    requires rebuilding the steam package (`nix build .#steam`), not just an env var.
 8. **`os.execute` in Lua 5.4 returns `true`/`nil`**, not an exit status. And `gsub`
    returns two values — wrap in parentheses before `table.insert`.
+9. **`LOG_DEBUG`/`LOG_TRACE` are compiled out in the release build** (they sit
+   inside `#ifdef DEBUG`), and the nix package does not set `DEBUG`. Anything a
+   test has to observe must be logged at `INFO` — `rg 'Vec Alloc'` in `.ember.log`
+   returns nothing for a perfectly healthy run.
 
 ## Useful probes
 
