@@ -52,6 +52,9 @@ your Steam desktop entry at it.
 
 On NixOS the script refuses to run and tells you to use the module instead.
 
+An AUR `PKGBUILD` for Arch lives in [`packaging/aur`](packaging/aur); it is not
+published to the AUR yet.
+
 ### Remove
 
 - NixOS: set `programs.ember.enable = false` and rebuild.
