@@ -331,16 +331,16 @@ another app`.
 5. **Publish ember-core.** The flake still points at
    `git+file:///home/axioncs/.local/share/ember-core?ref=ember`; switch to
    `github:axioncs/ember-core` once it is pushed.
-6. **Pattern catalog maintenance.** The durable risk: a client update invalidates
-   the byte signatures and the library aborts its own hooks. Needs a
-   re-derivation workflow, not a one-off fix.
+6. **Pattern catalog maintenance.** Partly addressed: `Patterns::init()` now logs
+   every signature that fails to resolve by name, at INFO, so a client update says
+   exactly what moved. Re-deriving them is still manual work.
 7. **AARCH64.** Patterns exist for it, never built or run.
-8. ~~**`CUtlVector::resize` in `src/sdk/CUtl.hpp` is wrong**~~ — fixed: it now
-   multiplies by `sizeof(T)` and updates `alloc`. Also fixed in the same pass:
-   `checkAppOwnership` used `LOG_NOTIFYWARN` (a desktop notification per call
-   during the pre-login window) and the blacklist loop skipped the element swapped
-   into a removed slot.
-9. **Docs.** No README in either repo; the handoff is the only entry point.
+8. ~~**`CUtlVector::resize`**~~ — fixed (see above).
+9. **Docs.** README exists now; the handoff is still the deep reference.
+10. **UI / ProtonDB badge.** Dropped. Millennium is a Steam-patching framework
+    (it installs a `libXtst` proxy into `steamrt64`) and pulling it in for one
+    badge contradicts the "minimal" goal. If a badge is ever wanted, the options
+    are a CEF/CDP sidecar (what the old stack did — heavy) or nothing.
 10. ~~**No tests.**~~ — done: the parser is now a pure unit
     (`src/feats/stplugin_parse.{hpp,cpp}`) with `tools/test_stplugin.cpp` covering
     every bug that shipped (raw-string terminator, three-argument `setManifestid`,

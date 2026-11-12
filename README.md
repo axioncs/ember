@@ -52,6 +52,16 @@ setManifestid(1245620,"<gid>")
 `ember import <file.lua|file.zip>` is planned (M4) and will do the same without
 a restart.
 
+## Doctor
+
+```fish
+ember doctor
+```
+
+Checks the client, the mapped core, the boot guard, the config, the imported
+scripts, the manifest store, pattern resolution and SteamID capture, and exits
+non-zero on failure. This is the first thing to run when something looks wrong.
+
 ## Milestones
 
 - **M0** core builds 64-bit and loads into the client ✅
