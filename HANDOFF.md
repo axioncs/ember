@@ -341,18 +341,24 @@ another app`.
    during the pre-login window) and the blacklist loop skipped the element swapped
    into a removed slot.
 9. **Docs.** No README in either repo; the handoff is the only entry point.
-10. **No tests.** The stplug-in parser has produced three real bugs (raw-string
-    terminator, three-argument `setManifestid`, filename-as-app-id). A fixture test
-    over `config/stplug-in` samples would have caught all three. Highest-value gap.
-11. **No crash guard.** A bad core means a client that dies at startup, with no way
-    in. A marker written before launch and cleared after hooks place, skipping
-    injection once if it survives, is ~30 lines and no daemon.
-12. **No manifest validation.** `ManifestStore::publish` copies any file named
-    `<depot>_<gid>.manifest` without checking it is a manifest or that the gid
-    matches. A corrupt file lands in depotcache.
-13. **`~/.ember.log` is unbounded.** No rotation.
-14. **No uninstall for the script path.** `install.sh` has no `--uninstall`.
-15. **No config schema version.** A key rename reproduces the ten-warning toast.
+10. ~~**No tests.**~~ — done: the parser is now a pure unit
+    (`src/feats/stplugin_parse.{hpp,cpp}`) with `tools/test_stplugin.cpp` covering
+    every bug that shipped (raw-string terminator, three-argument `setManifestid`,
+    filename-as-app-id, comments, CRLF, malformed lines, duplicate depots).
+    `make test-stplugin` runs on the host; `nix build .#checks.x86_64-linux.stplugin`
+    runs it in the sandbox.
+11. ~~**No crash guard.**~~ — done: `~/.config/ember/.boot-in-progress` is written
+    before hook placement and removed after. If it survives, the next start runs
+    vanilla for one session.
+12. ~~**No manifest validation.**~~ — partially: zero-byte manifests are refused.
+    A real manifest parse (gid vs filename) is still open.
+13. ~~**`~/.ember.log` unbounded.**~~ — done: rotated to `.ember.log.1` past 8 MiB.
+14. ~~**No uninstall for the script path.**~~ — done: `install.sh --uninstall`
+    removes the library, the launcher, and only a desktop entry that carries our
+    `LD_AUDIT` line.
+15. **No config schema version.** Deferred: the value is low while the config is
+    regenerated from the template, and adding the key would warn every existing
+    config once.
 16. ~~**Zip path traversal**~~ — fixed: `ember import` lists entries with
     `unzip -Z1` and refuses absolute paths, `..`, and drive letters before
     extracting. Verified with a crafted archive.
