@@ -78,8 +78,9 @@ local function scanScript(path)
 		out.apps[stem] = true
 	end
 
-	for line in content:gmatch("[^\n]+") do
-		line = trim(line:gsub("%-%-.*$", ""))
+	for raw in content:gmatch("[^\n]+") do
+		-- The for control variable is const in Lua 5.4; never assign to it.
+		local line = trim(raw:gsub("%-%-.*$", ""))
 		local name, args = line:match("^(%w+)%s*%((.*)%)$")
 		if name then
 			name = name:lower()
