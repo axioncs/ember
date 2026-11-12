@@ -64,11 +64,12 @@ local function trim(value)
 	return (value:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
--- Counts the directives a stplug-in script contributes.
+-- Collects the directives a stplug-in script contributes, keyed by app/depot
+-- so duplicates across files collapse the same way the core's maps do.
 local function scanScript(path)
-	local counts = { apps = 0, keys = 0, pins = 0 }
+	local out = { apps = {}, keys = {}, pins = {} }
 	local content = readFile(path)
-	if not content then return counts end
+	if not content then return out end
 
 	for line in content:gmatch("[^\n]+") do
 		line = trim(line:gsub("%-%-.*$", ""))
@@ -81,16 +82,22 @@ local function scanScript(path)
 			end
 			if name == "addappid" then
 				if #parts == 1 then
-					counts.apps = counts.apps + 1
+					out.apps[parts[1]] = true
 				elseif #parts == 3 then
-					counts.keys = counts.keys + 1
+					out.keys[parts[1]] = true
 				end
 			elseif name == "setmanifestid" and #parts == 2 then
-				counts.pins = counts.pins + 1
+				out.pins[parts[1]] = true
 			end
 		end
 	end
-	return counts
+	return out
+end
+
+local function count(t)
+	local n = 0
+	for _ in pairs(t) do n = n + 1 end
+	return n
 end
 
 local function isManifestName(name)
@@ -112,7 +119,7 @@ local function cmdImport(path)
 		local counts = scanScript(path)
 		ok("cp -f '" .. path .. "' '" .. stplugDir() .. "/" .. base .. "'")
 		print(string.format("imported %s: %d app id(s), %d depot key(s), %d manifest pin(s)",
-			base, counts.apps, counts.keys, counts.pins))
+			base, count(counts.apps), count(counts.keys), count(counts.pins)))
 		print("Steam picks it up on the next config reload; no restart needed.")
 		return 0
 	end
@@ -154,14 +161,16 @@ end
 
 local function cmdList()
 	local scripts = listFiles(stplugDir(), ".lua")
-	local apps, keys, pins = 0, 0, 0
+	local apps, keys, pins = {}, {}, {}
 	for _, name in ipairs(scripts) do
 		local counts = scanScript(stplugDir() .. "/" .. name)
-		apps, keys, pins = apps + counts.apps, keys + counts.keys, pins + counts.pins
+		for id in pairs(counts.apps) do apps[id] = true end
+		for id in pairs(counts.keys) do keys[id] = true end
+		for id in pairs(counts.pins) do pins[id] = true end
 	end
 
 	print(string.format("stplug-in: %d script(s), %d app id(s), %d depot key(s), %d manifest pin(s)",
-		#scripts, apps, keys, pins))
+		#scripts, count(apps), count(keys), count(pins)))
 	for _, name in ipairs(scripts) do
 		print("  " .. name)
 	end
