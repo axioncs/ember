@@ -301,9 +301,11 @@ The user confirmed the install dialog and the download are correct.
    the byte signatures and the library aborts its own hooks. Needs a
    re-derivation workflow, not a one-off fix.
 7. **AARCH64.** Patterns exist for it, never built or run.
-8. **`CUtlVector::resize` in `src/sdk/CUtl.hpp` is wrong** — it passes the element
-   count to `Plat_Realloc` as a byte count and never updates `alloc`. Unused
-   today; a trap for the next caller.
+8. ~~**`CUtlVector::resize` in `src/sdk/CUtl.hpp` is wrong**~~ — fixed: it now
+   multiplies by `sizeof(T)` and updates `alloc`. Also fixed in the same pass:
+   `checkAppOwnership` used `LOG_NOTIFYWARN` (a desktop notification per call
+   during the pre-login window) and the blacklist loop skipped the element swapped
+   into a removed slot.
 9. **Docs.** No README in either repo; the handoff is the only entry point.
 
 
