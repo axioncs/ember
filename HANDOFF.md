@@ -4,9 +4,9 @@ Everything a fresh session needs. Read this before acting.
 
 ## Goal
 
-A maintained replacement for the `slsteam-moon` + `Lumen` + `luatools-moon` stack,
-which broke when Steam moved to the 64-bit `steamrt64` client (its audit libs are
-`-m32` and get rejected with `ELFCLASS32`).
+A 64-bit Steam library hook. The earlier 32-bit approach no longer works: Steam
+moved to the `steamrt64` client, which rejects `-m32` audit libraries with
+`ELFCLASS32`.
 
 Target: 64-bit core, distro-agnostic (Arch/Fedora via script, NixOS via module),
 no installer daemons, no sidecar. Named **ember**.
@@ -285,14 +285,14 @@ The user confirmed the install dialog and the download are correct.
 
 ### Round 6 change: size fallback, empty and foreign depots
 
-Checked how the old stack selected depots, expecting a language policy to copy. It
-has none: `rg -i language src/feats/*.cpp` in slsteam-moon returns only
-`baselanguages` as metadata to skip. Moon never filtered depots — it provisioned
+Checked how the earlier 32-bit hook selected depots, expecting a language policy to
+copy. It has none: a search for `language` across its feature sources returns only
+`baselanguages` as metadata to skip. It never filtered depots — it provisioned
 appinfo and let Steam's own planner apply `oslist`/`language`. Ember fills the
 vector directly, so it has to replicate those filters itself, and already does more
-than moon did.
+than that hook did.
 
-What moon did have, and ember lacked:
+What the earlier hook did have, and ember lacked:
 
 - `emptydepot.hpp`: a size-0 depot's stub manifest trips
   `Assert(!m_strName.IsEmpty())` in `contentmanifest.cpp` and SEGV-crashes the
@@ -427,9 +427,9 @@ awk '/^14IClientUserMap$/,/^};$/' ~/.ember.log
 
 ## Standing constraints
 
-- The user said: **do not copy other projects' code** (slsteam-moon, the patchset
-  offered in swwayps/slsteam-moon#9). Implement independently. That issue is useful
-  only as a description of the problem.
+- The user said: **do not copy other projects' code** (including the patchset
+  offered upstream for the earlier hook). Implement independently. That issue is
+  useful only as a description of the problem.
 - Do not tell the user to roll Steam back to the 32-bit client. They chose ember.
 - **Do not publish either repo** (no `gh repo create`, no push to a public remote)
   until the user has verified everything. The flake inputs stay local paths.
