@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/system/plugin-schema.json",
+  "name": "ember",
+  "common_name": "ember",
+  "description": "ProtonDB ratings on Steam store and app pages.",
+  "version": "0.1.0",
+  "useBackend": true
+}
