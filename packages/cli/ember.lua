@@ -151,19 +151,37 @@ local function cmdImport(path)
 		mkdirp(storeDir())
 		mkdirp(stplugDir())
 
-		local manifests, scripts = 0, 0
+		-- Two passes: manifests first, scripts last. The stplug-in directory is
+		-- watched, so copying a script triggers a reload — the store has to be
+		-- complete by then or the reload publishes nothing.
+		local sources = {}
 		for source in sh("find '" .. tmp .. "' -type f"):gmatch("[^\n]+") do
+			table.insert(sources, source)
+		end
+
+		local manifests, scripts = 0, 0
+		for _, source in ipairs(sources) do
 			local name = source:match("([^/]+)$")
 			if isManifestName(name) then
 				ok("cp -f '" .. source .. "' '" .. storeDir() .. "/" .. name .. "'")
 				manifests = manifests + 1
-			elseif name:sub(-4) == ".lua" then
+			end
+		end
+		for _, source in ipairs(sources) do
+			local name = source:match("([^/]+)$")
+			if name:sub(-4) == ".lua" and not isManifestName(name) then
 				ok("cp -f '" .. source .. "' '" .. stplugDir() .. "/" .. name .. "'")
 				scripts = scripts + 1
 			end
 		end
 
 		ok("rm -rf '" .. tmp .. "'")
+
+		-- A manifest-only archive touches nothing the watcher watches, so force
+		-- the reload explicitly.
+		if manifests > 0 then
+			ok("touch '" .. configDir() .. "/config.yaml'")
+		end
 		print(string.format("imported %s: %d manifest(s), %d script(s)", base, manifests, scripts))
 		if manifests > 0 then
 			print("Manifests are published to depotcache on the next config reload.")
