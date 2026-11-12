@@ -158,34 +158,59 @@ strings are in the .so, and `nix build
 .#nixosConfigurations.nixos.config.programs.steam.package` in `~/nixos` resolves
 `ember-core-0.1.0` (drv `a8ja3f1hnjiiax04rq9v2gvc970hlqhz`) into that closure.
 
-### Next test (one round)
+### Round 1 result: plan filled, still 0 mounted depots
 
-Restart Steam, then install an added app (1091500 is the biggest: 47 depots).
+`Depot plan: synthesised 47 depot(s) for unowned app 1091500` logged six times, and
+`content_log.txt` still said `0 mounted depots` / `0 updated, 0 moved, 0 deleted`.
+The vector was filled and then thrown away. Two things were missing, both read out
+of the callers of `0x1079640`:
+
+1. **The return value is the gate.** Every call site does
+   `test %al,%al; je <bail>` and the bail path frees both vectors
+   (`0x107ad0d`/`0x107ad28`, `0x10b5593`/`0x10b5597`, `0x112d018`, `0x112d9de`).
+   The original answers false for an app it cannot build a plan for, so a filled
+   vector is discarded before anyone looks at it. The hook now returns
+   `success || synthesised`.
+2. **`DepotInfo_t+0x10` is the size**, summed into the install total by the caller
+   (`0x107ad80: mov 0x10(%rax),%r11; add %r11,(%rbx)`), and `+0x18` is a flag that
+   gates a second accumulator (the client writes 0 there itself). A plan with
+   size 0 is the `0 B` in the install dialog. ember now writes the size from the
+   three-argument `setManifestid`.
+
+### Next test (round 2)
+
+Restart Steam, then install **1222140** first — one depot, small, fast. Then
+1091500 for the size display.
 
 ```fish
-rg -n 'stplug-in:|Depot plan:' ~/.ember.log | tail
+rg -n 'Depot plan:' ~/.ember.log | tail
 tail -20 ~/.local/share/Steam/logs/content_log.txt
 ```
 
-Expected, computed against the five scripts on disk:
+Expected:
 
 ```
-stplug-in: 5 file(s), 46 app id(s) (+46), 128 depot key(s), 123 manifest pin(s) (+123), 125 depot(s) planned over 5 app(s)
-Depot plan: synthesised 47 depot(s) for unowned app 1091500
+Depot plan: synthesised 1 depot(s) for unowned app 1222140
+Depot plan: app 1222140: original returned no plan, handing back 1 depot(s) as success
 ```
 
-Per app: 1091500→47, 203160→65, 1245620→9, 1850570→3, 1222140→1. Then
-`content_log.txt` must stop saying `0 mounted depots` for that app.
+and `content_log.txt` must show `1 mounted depots` and a real download, not
+`0 updated, 0 moved, 0 deleted files`.
 
-- No `Depot plan:` line at all → the hook never ran for that app; check
-  `rg 'BuildDepotDependency'` (DEBUG is stripped in release, so expect nothing)
-  and confirm the plan hook resolved (`rg 'Hooks placed'`).
-- `plan stays empty` → the app's script has no pins; importer problem, not plan.
-- `0 mounted depots` survives with `synthesised N` logged → the plan is fine and
-  the manifests are the problem (check every pinned `<depot>_<gid>.manifest` in
-  depotcache).
-- `0 B` in the UI but the download runs → the plan is right; `DepotInfo_t+0x10`
-  is then the size field after all, and it is currently written as 0.
+Readings:
+
+- `0 B` in the dialog is **expected** for 1222140/1850570/1245620/203160: only the
+  Hubcap script (1091500) carries sizes in its `setManifestid` calls, so those
+  four have nothing to put in `+0x10`. The size is a display estimate; the
+  download is driven by the manifests. 1091500 should show ~318 GB, because its
+  script pins every language pack — depot selection is the next problem, not a
+  bug in the plan.
+- Still `0 mounted depots` with both new lines logged → the plan is accepted but
+  the depots are rejected downstream; next place to look is the depot licence /
+  appinfo path, not this vector.
+- No `handing back` line → the original already returned true, so the gate was
+  never the problem and the mount failure is elsewhere.
+
 
 
 ## Findings worth not re-deriving
