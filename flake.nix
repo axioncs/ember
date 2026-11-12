@@ -5,10 +5,10 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
     # Fork of AceSLS/SLSsteam, branch `ember` off `dev-multiarch`.
-    # Local path while the fork is not published; switch to
+    # Local git input while the fork is not published; switch to
     # github:axioncs/ember-core once it is.
     ember-core = {
-      url = "path:../ember-core";
+      url = "git+file:///home/axioncs/.local/share/ember-core?ref=ember";
       flake = false;
     };
   };
