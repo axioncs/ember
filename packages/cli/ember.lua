@@ -71,6 +71,13 @@ local function scanScript(path)
 	local content = readFile(path)
 	if not content then return out end
 
+	-- The script is named after the app it unlocks; some generators only put the
+	-- app id inside a depot-key line, so the filename is authoritative.
+	local stem = path:match("([^/]+)%.lua$")
+	if stem and stem:match("^%d+$") then
+		out.apps[stem] = true
+	end
+
 	for line in content:gmatch("[^\n]+") do
 		line = trim(line:gsub("%-%-.*$", ""))
 		local name, args = line:match("^(%w+)%s*%((.*)%)$")
