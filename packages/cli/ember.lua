@@ -447,6 +447,56 @@ local function cmdRemove(appid)
 	return 0
 end
 
+local function dataDir()
+	local xdg = os.getenv("XDG_DATA_HOME")
+	return (xdg and xdg ~= "" and xdg or (home() .. "/.local/share")) .. "/ember"
+end
+
+local function installedVersion()
+	local text = readFile(dataDir() .. "/VERSION")
+	return text and trim(text) or ""
+end
+
+local function latestVersion()
+	local body = sh("curl -fsSL https://api.github.com/repos/axioncs/ember/releases/latest 2>/dev/null")
+	return body:match('"tag_name"%s*:%s*"([^"]+)"') or ""
+end
+
+local function cmdUpdate(checkOnly)
+	-- On NixOS the library comes from the flake; installing over it would be
+	-- overwritten on the next rebuild anyway.
+	if isFile("/etc/NIXOS") then
+		print("ember is managed by the NixOS module here.")
+		print("  cd ~/nixos && nix flake update ember && nh os switch ~/nixos")
+		return 1
+	end
+
+	local installed = installedVersion()
+	local latest = latestVersion()
+	if latest == "" then
+		io.stderr:write("ember: cannot reach github.com to check for releases\n")
+		return 1
+	end
+
+	print(string.format("installed  %s", installed ~= "" and installed or "unknown"))
+	print(string.format("latest     %s", latest))
+
+	if installed == latest then
+		print("up to date")
+		return 0
+	end
+
+	if checkOnly then
+		print("a newer release is available: ember update")
+		return 0
+	end
+
+	print("")
+	local ok_run = os.execute(
+		"curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh")
+	return ok_run == true and 0 or 1
+end
+
 local function usage()
 	print([[
 ember — Steam library tooling
@@ -456,6 +506,7 @@ ember — Steam library tooling
   ember list                         show imported scripts and stored manifests
   ember status                       show client, store and depotcache state
   ember doctor                       check the whole stack and say what is wrong
+  ember update [--check]             update to the latest release
 ]])
 end
 
@@ -470,6 +521,8 @@ elseif command == "status" then
 	os.exit(cmdStatus())
 elseif command == "doctor" then
 	os.exit(cmdDoctor())
+elseif command == "update" then
+	os.exit(cmdUpdate(arg[2] == "--check"))
 else
 	usage()
 	os.exit(command == nil and 0 or 1)
