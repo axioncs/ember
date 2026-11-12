@@ -35,9 +35,22 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = config.programs.steam.enable;
+        message = "programs.ember needs programs.steam.enable = true; otherwise the library is built but nothing loads it.";
+      }
+      {
+        assertion = cfg.steamPackage ? override;
+        message = "programs.ember.steamPackage must be an overridable Steam package (one built with pkgs.steam.override, e.g. pkgs.steamWithMillennium).";
+      }
+    ];
+
     environment.systemPackages = [ cfg.cli ];
 
-    # extraEnv lands in the FHS profile, which the container init sources.
+    # extraEnv lands in the FHS profile, which the container init sources. Setting
+    # it there rather than in the global environment keeps it scoped to Steam and
+    # lets it override any inherited LD_AUDIT.
     programs.steam.package = cfg.steamPackage.override {
       extraEnv = {
         LD_AUDIT = "${cfg.package}/lib/ember/ember-core.so";

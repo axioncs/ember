@@ -116,6 +116,30 @@ non-zero on failure.
 | Steam starts but nothing works, once | The crash guard tripped after a failed start; it clears on the next launch |
 | Broken after a Steam client update | Steam's code signatures moved. `ember doctor` names them; a new ember release is needed |
 
+## Compatibility
+
+**Do not run two client hooks at once.** Remove any other Steam library mod before
+enabling ember — the older slsteam-moon / LuaTools stack, a standalone SLSsteam, or
+anything else that loads a library into the client. They share the `stplug-in`
+folder and would both try to own licensing.
+
+**Millennium composes.** Its package keeps `override`, so pass it through instead
+of nesting:
+
+```nix
+programs.ember.steamPackage = pkgs.steamWithMillennium;
+```
+
+**ember owns `programs.steam.package`.** If another module sets that option too,
+Nix reports conflicting definitions. Use `programs.ember.steamPackage` rather than
+defining `programs.steam.package` yourself.
+
+**Anti-cheat.** Games using EAC or BattlEye can treat a modified client as
+tampering. Avoid ember in multiplayer titles you care about.
+
+**Flatpak Steam** is not supported by either install path; both assume a native
+Steam install.
+
 ## How it works
 
 ember is a shared library that Steam loads at startup. It answers Steam's ownership
