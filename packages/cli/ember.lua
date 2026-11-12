@@ -132,6 +132,15 @@ local function cmdImport(path)
 	end
 
 	if lower:sub(-4) == ".zip" then
+		-- Reject archives that would write outside the extraction directory
+		-- before unzip gets a chance to do it.
+		for entry in sh("unzip -Z1 '" .. path .. "' 2>/dev/null"):gmatch("[^\n]+") do
+			if entry:match("^/") or entry:match("^%.%.") or entry:match("/%.%./") or entry:match("^%a:") then
+				io.stderr:write("ember: refusing " .. path .. ": unsafe entry '" .. entry .. "'\n")
+				return 1
+			end
+		end
+
 		local tmp = trim(sh("mktemp -d"))
 		if not ok("unzip -o -q '" .. path .. "' -d '" .. tmp .. "'") then
 			ok("rm -rf '" .. tmp .. "'")
