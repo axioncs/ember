@@ -19,7 +19,16 @@
     }:
     let
       systems = [ "x86_64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          f (import nixpkgs {
+            inherit system;
+            config.allowUnfreePredicate =
+              pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "steam" "steam-unwrapped" ];
+          })
+        );
     in
     {
       packages = forAllSystems (
@@ -29,6 +38,8 @@
         in
         {
           inherit core;
+
+          cli = pkgs.callPackage ./packages/cli { };
 
           # Steam with the audit library injected. Usable directly for testing
           # without a system rebuild: nix run .#steam
