@@ -3,14 +3,19 @@
     "ember-core": {
       "flake": false,
       "locked": {
-        "path": "../ember-core",
-        "type": "path"
+        "lastModified": 1794464933,
+        "narHash": "sha256-7M323gaLBt70C/7ZQuyZMhY2ySbGMO7y2o82W1yUi0c=",
+        "ref": "ember",
+        "rev": "8c9e7f0a95f63bcf400daa75c5f01f8479bf3cd8",
+        "revCount": 1190,
+        "type": "git",
+        "url": "file:///home/axioncs/.local/share/ember-core"
       },
       "original": {
-        "path": "../ember-core",
-        "type": "path"
-      },
-      "parent": []
+        "ref": "ember",
+        "type": "git",
+        "url": "file:///home/axioncs/.local/share/ember-core"
+      }
     },
     "nixpkgs": {
       "locked": {

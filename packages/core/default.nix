@@ -47,11 +47,16 @@ stdenv.mkDerivation {
   '';
 
   # The audit library is dlopen'd by the Steam client inside its FHS sandbox.
-  # Pin its own dependencies by absolute path so the runtime's libcurl/dbus
-  # cannot shadow the ones it was linked against.
+  # Pin its own dependencies by absolute path so the runtime's libcurl/dbus/
+  # libstdc++ cannot shadow the ones it was linked against.
   postFixup = ''
-    patchelf --force-rpath --set-rpath ${lib.makeLibraryPath [ curl dbus ]} \
-      $out/lib/ember/ember-core.so
+    patchelf --force-rpath --set-rpath ${
+      lib.makeLibraryPath [
+        curl
+        dbus
+        (lib.getLib stdenv.cc.cc)
+      ]
+    } $out/lib/ember/ember-core.so
   '';
 
   meta = {
