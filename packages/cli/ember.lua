@@ -67,7 +67,7 @@ end
 -- Collects the directives a stplug-in script contributes, keyed by app/depot
 -- so duplicates across files collapse the same way the core's maps do.
 local function scanScript(path)
-	local out = { apps = {}, keys = {}, pins = {} }
+	local out = { apps = {}, keys = {}, pins = {}, pinGid = {} }
 	local content = readFile(path)
 	if not content then return out end
 
@@ -95,6 +95,7 @@ local function scanScript(path)
 				end
 			elseif name == "setmanifestid" and (#parts == 2 or #parts == 3) then
 				out.pins[parts[1]] = true
+				out.pinGid[parts[1]] = parts[2]
 			end
 		end
 	end
@@ -110,6 +111,15 @@ end
 local function isManifestName(name)
 	local depot, gid = name:match("^(%d+)_(%d+)%.manifest$")
 	return depot ~= nil and gid ~= nil
+end
+
+-- Steam's content manifest starts with the 32-bit magic 0x71F617D0.
+local function looksLikeManifest(path)
+	local f = io.open(path, "rb")
+	if not f then return false end
+	local magic = f:read(4)
+	f:close()
+	return magic == "\208\23\246\113"
 end
 
 local function cmdImport(path)
@@ -159,12 +169,16 @@ local function cmdImport(path)
 			table.insert(sources, source)
 		end
 
-		local manifests, scripts = 0, 0
+		local manifests, scripts, rejected = 0, 0, 0
 		for _, source in ipairs(sources) do
 			local name = source:match("([^/]+)$")
 			if isManifestName(name) then
-				ok("cp -f '" .. source .. "' '" .. storeDir() .. "/" .. name .. "'")
-				manifests = manifests + 1
+				if looksLikeManifest(source) then
+					ok("cp -f '" .. source .. "' '" .. storeDir() .. "/" .. name .. "'")
+					manifests = manifests + 1
+				else
+					rejected = rejected + 1
+				end
 			end
 		end
 		for _, source in ipairs(sources) do
@@ -183,6 +197,9 @@ local function cmdImport(path)
 			ok("touch '" .. configDir() .. "/config.yaml'")
 		end
 		print(string.format("imported %s: %d manifest(s), %d script(s)", base, manifests, scripts))
+		if rejected > 0 then
+			print(string.format("skipped %d file(s) that are not Steam manifests", rejected))
+		end
 		if manifests > 0 then
 			print("Manifests are published to depotcache on the next config reload.")
 		end
@@ -325,6 +342,32 @@ local function cmdDoctor()
 	line("manifest store", string.format("%d file(s)", #stored), #stored > 0 and "ok" or "info")
 	line("depotcache", string.format("%d manifest(s), staged on demand", #cached), "info")
 
+	-- Every pin has to have its manifest in the store, or the install fails with
+	-- "No connection" when Steam asks the server for a manifest request code.
+	local storeSet = {}
+	for _, name in ipairs(stored) do storeSet[name] = true end
+	local totalPins, missingPins = 0, 0
+	local missingByApp = {}
+	for _, name in ipairs(scripts) do
+		local sc = scanScript(stplugDir() .. "/" .. name)
+		local appMissing = 0
+		for depot, gid in pairs(sc.pinGid) do
+			totalPins = totalPins + 1
+			if not storeSet[depot .. "_" .. gid .. ".manifest"] then
+				missingPins = missingPins + 1
+				appMissing = appMissing + 1
+			end
+		end
+		if appMissing > 0 then
+			table.insert(missingByApp, string.format("%s (%d)", name:gsub("%.lua$", ""), appMissing))
+		end
+	end
+	line("coverage", string.format("%d of %d pin(s) have a manifest",
+		totalPins - missingPins, totalPins), missingPins == 0 and "ok" or "warn")
+	if missingPins > 0 then
+		line("", "incomplete: " .. table.concat(missingByApp, ", "), "info")
+	end
+
 	local log = sh("tr -d '\\0' < " .. home() .. "/.ember.log 2>/dev/null")
 	if log == "" then
 		line("log", "empty or unreadable", "info")
@@ -362,11 +405,54 @@ local function cmdDoctor()
 	return 0
 end
 
+local function cmdRemove(appid)
+	if not appid or not appid:match("^%d+$") then
+		io.stderr:write("ember: usage: ember remove <appid>\n")
+		return 2
+	end
+
+	local script = stplugDir() .. "/" .. appid .. ".lua"
+	if not isFile(script) then
+		io.stderr:write("ember: nothing imported for " .. appid .. "\n")
+		return 1
+	end
+
+	local sc = scanScript(script)
+
+	-- A depot manifest can be pinned by more than one app, so keep whatever the
+	-- remaining scripts still reference.
+	local keep = {}
+	for _, name in ipairs(listFiles(stplugDir(), ".lua")) do
+		if name ~= appid .. ".lua" then
+			local other = scanScript(stplugDir() .. "/" .. name)
+			for depot, gid in pairs(other.pinGid) do
+				keep[depot .. "_" .. gid .. ".manifest"] = true
+			end
+		end
+	end
+
+	local removed = 0
+	for depot, gid in pairs(sc.pinGid) do
+		local name = depot .. "_" .. gid .. ".manifest"
+		if not keep[name] and isFile(storeDir() .. "/" .. name) then
+			ok("rm -f '" .. storeDir() .. "/" .. name .. "'")
+			removed = removed + 1
+		end
+	end
+
+	ok("rm -f '" .. script .. "'")
+	ok("touch '" .. configDir() .. "/config.yaml'")
+
+	print(string.format("removed %s: 1 script, %d manifest(s)", appid, removed))
+	return 0
+end
+
 local function usage()
 	print([[
 ember — Steam library tooling
 
   ember import <file.lua|file.zip>   import a script or a manifest archive
+  ember remove <appid>               drop an imported app and its manifests
   ember list                         show imported scripts and stored manifests
   ember status                       show client, store and depotcache state
   ember doctor                       check the whole stack and say what is wrong
@@ -376,6 +462,8 @@ end
 local command = arg[1]
 if command == "import" then
 	os.exit(cmdImport(arg[2]))
+elseif command == "remove" then
+	os.exit(cmdRemove(arg[2]))
 elseif command == "list" then
 	os.exit(cmdList())
 elseif command == "status" then
