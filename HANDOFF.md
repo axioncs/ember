@@ -59,11 +59,20 @@ bypasses the deployed system and is faster to iterate.
 - **CLI**: `packages/cli` (Lua 5.4). `ember import <file.lua|file.zip>`, `ember list`,
   `ember status`. Installed by the module into `environment.systemPackages`.
 - **Ownership SteamID**: `hkClientUser_GetSteamId` ignores the anonymous sentinel.
+- **Depot plan**: `src/feats/apps.cpp`. `CUserAppManager::BuildDepotDependency`
+  returns an empty vector for unowned apps, so the plan is synthesised from the
+  stplug-in pins, filtered by appinfo `oslist` and `DepotLanguages`, and handed
+  back with `success || synthesised`. Installs download and complete. Details and
+  the round-by-round history are below.
 
-## Current blocker: installs report 0 B
+## Depot plan (solved)
 
-After licensing was fixed, an install starts but downloads nothing. All added games
-show 0 B. `content_log.txt` says `0 mounted depots`.
+Installs of added apps used to report 0 B and mount nothing. The plan layer is now
+done; the sections below are the record of how, kept because the layouts and the
+filter rules are the expensive part to re-derive.
+
+After licensing was fixed, an install started but downloaded nothing. All added
+games showed 0 B. `content_log.txt` said `0 mounted depots`.
 
 Cause: `CUserAppManager::BuildDepotDependency` returns an **empty** depot vector for
 apps the account does not own. Upstream's `Apps::buildDepotDependency` only iterates
@@ -254,15 +263,27 @@ describes the base app's own depots.
 - `Depot plan: app %u keeps <ids>` is logged once per distinct plan, because
   DEBUG is stripped from release builds and there was no way to see the list.
 
-Expected now: 1091501 + 1091508 + 2060310 + 228988 + 2138330 + 2138335 + 2224070
-= 7 depots, 100.0 GB of manifest size (~92 GB in the dialog).
+### Round 5 result: confirmed working
+
+```
+Depot plan: app 1091500 keeps 1091501,1091508,228988,2060310,2138330,2138335
+Depot plan: app 1091500: 20 of 47 depot(s) localised, 18 dropped for language [english,japanese], 23 dropped for platform
+```
+
+6 depots, 98.2 GB of manifest size: base content (with English voice), Japanese
+voice, VC redist, REDmod, Phantom Liberty content, Phantom Liberty Japanese voice.
+`localised` went 10 → 20, which is the DLC fallback working: the Phantom Liberty
+speech packs are now language-filtered too. 2224070 is dropped by platform (its
+`oslist` is macOS-only despite the manifest carrying `archive\pc\` paths).
+
+The user confirmed the install dialog and the download are correct.
 
 ## Remaining work
 
-1. **Depot selection, rest of it.** Platform and language are done. `dlcappid` is
-   the remaining filter Steam applies — deliberately not implemented, because
-   ember cannot tell an owned DLC from an unowned one for an added app, and
-   dropping Phantom Liberty would be wrong here.
+1. **Depot selection.** Done: platform (`oslist`), language (`DepotLanguages`), and
+   the DLC appinfo fallback. `dlcappid` is deliberately not filtered — ember cannot
+   tell an owned DLC from an unowned one for an added app, and dropping Phantom
+   Liberty would be wrong.
 2. **Manifest coverage.** 203160 has 0 of 65 pins in the store (11 in depotcache),
    so it fails with "No connection" until its manifests are imported. User data,
    not code.
@@ -294,6 +315,7 @@ Expected now: 1091501 + 1091508 + 2060310 + 228988 + 2138330 + 2138335 + 2224070
 | `wrong ELF class: ELFCLASS32` | 32-bit audit libs vs 64-bit client. Present since install day; noise for child processes only |
 | `Failed to find all patterns` | Stale pattern catalog after a client update — the old stack's real death |
 | `0 mounted depots` / 0 B | Empty `BuildDepotDependency` vector (see above) |
+| Install plans every language pack and the macOS half | A script pins every depot the app has. Steam filters by appinfo `depots/<id>/config/oslist` and `.../language`, and a DLC's depots are described in the **DLC's** appinfo (`extended/listofdlc`), not the base app's |
 | `No licenses` on install | The app id was missing from `addedAppIds`. A script named `1091500.lua` had **no bare `addappid(1091500)`** — only a depot-key line. Fix: the filename is an app id |
 | Stealth ignore of everything | `CSteamId::isSet()` is `accountId() != 0`; `GetSteamID` returns the anonymous sentinel (`76561197960265728`) before login |
 | No "loaded" toast | `NotifyInit` gates it; it is `yes` again and now logs app id count |
