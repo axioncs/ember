@@ -41,6 +41,8 @@
 
           cli = pkgs.callPackage ./packages/cli { };
 
+          plugin = pkgs.callPackage ./packages/plugin { };
+
           # Steam with the audit library injected. Usable directly for testing
           # without a system rebuild: nix run .#steam
           steam = pkgs.steam.override {
