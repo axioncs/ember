@@ -4,9 +4,8 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    # Local until published; switch to github:axioncs/ember-core.
     ember-core = {
-      url = "git+file:///home/axioncs/.local/share/ember-core?ref=ember";
+      url = "github:axioncs/ember-core?ref=ember";
       flake = false;
     };
   };
