@@ -199,25 +199,46 @@ Two things surfaced, neither a plan bug:
   `DepotKey: substituted key` never fires. The substitution layer is still
   unproven end to end; it is masked by that cache, not exercised by it.
 
-### Round 3 change: language filtering
+### Round 3 result: 296 → 201 GB, still too big
 
-A script pins every depot the app has, one per language pack, so Cyberpunk planned
-to 296 GB. Steam picks by the client's language; ember now does the same:
+The language filter worked but only removed the speech packs. Reading the pinned
+manifests' file lists explains the rest — the script pins **both platforms**:
 
-- language from `HKCU\Software\Valve\Steam\language` in `~/.steam/registry.vdf`
-  (`english` here), read once — changing it needs a client restart anyway.
-- per pinned depot, `depots/<id>/config/language` from appinfo. Empty or
-  unreadable means "cannot tell" and the depot is kept, so a missing appinfo
-  degrades to the previous behaviour instead of dropping content.
+| depot | size | platform | what |
+|---|---|---|---|
+| 1091501 | 66.4 GB | `archive\pc\` | base content, includes `lang_en_voice.archive` |
+| 1460472 | 65.2 GB | `archive\Mac\` | the same content for macOS |
+| 1091502-1091509, 1460470-1460471 | 50.8 GB | pc | speech packs (PL RU FR IT DE ES JP ZH KO BRPT) |
+| 1460473-1460479, 2060311-2060313 | 51.0 GB | mac | the same speech packs for macOS |
+| 2138330 | 24.9 GB | pc | Phantom Liberty content |
+| 2224089 | 24.5 GB | mac | Phantom Liberty content for macOS |
+| 2138331-2138339 | 15.9 GB | pc | Phantom Liberty speech |
+| 2224071-2224080 | 19.6 GB | mac | Phantom Liberty speech for macOS |
+
+SteamDB confirms depot 1091501 is Windows-only and carries `lang_en_voice.archive`,
+so English audio needs no speech depot at all.
+
+### Round 4 change: platform filter + configurable language set
+
+- **oslist**: a depot whose appinfo `oslist` names neither `windows` nor `linux`
+  is dropped. That is the entire macOS half (~160 GB here). Values verified in the
+  appinfo cache: `windows`, `macos`, `linux`, comma separated.
+- **`DepotLanguages`** (new config key, comma separated appinfo names, empty = the
+  client's language): a depot localised outside the set is dropped.
+  `english,japanese` keeps English audio (in the main content depot) plus the
+  Japanese voice pack.
 - log: `Depot plan: app %u: %zu of %zu depot(s) localised, %zu dropped for
-  language '%s'`. `localised == 0` means appinfo carried no depot language config
-  at all — that is the line to read first if the size does not shrink.
+  language [%s], %zu dropped for platform`.
+
+Expected for 1091500 with `english,japanese`: 66.4 + 4.9 (JP voice) + 24.9 + 1.9
+(PL JP voice) + 1.8 + 0.1 ≈ **100 GB**, 8 depots.
 
 ## Remaining work
 
-1. **Depot selection, rest of it.** Language is done. `depots/<id>/optional` and
-   `dlcappid` are the other two filters Steam applies; only worth adding if a
-   title shows up with content that should not be installed.
+1. **Depot selection, rest of it.** Platform and language are done. `dlcappid` is
+   the remaining filter Steam applies — deliberately not implemented, because
+   ember cannot tell an owned DLC from an unowned one for an added app, and
+   dropping Phantom Liberty would be wrong here.
 2. **Manifest coverage.** 203160 has 0 of 65 pins in the store (11 in depotcache),
    so it fails with "No connection" until its manifests are imported. User data,
    not code.
