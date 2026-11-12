@@ -3,6 +3,7 @@ pkgbase = ember-git
 	pkgver = 0.1.0
 	pkgrel = 1
 	url = https://github.com/axioncs/ember
+	install = ember-git.install
 	arch = x86_64
 	license = AGPL-3.0-only
 	makedepends = git

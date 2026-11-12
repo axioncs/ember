@@ -14,6 +14,7 @@ depends=('curl' 'dbus' 'gcc-libs' 'lua' 'unzip')
 makedepends=('git' 'gcc' 'make' 'pkgconf' 'luajit' 'curl' 'dbus')
 provides=('ember')
 conflicts=('ember')
+install=ember-git.install
 source=(
   "ember-core::git+https://github.com/axioncs/ember-core#branch=ember"
   "ember::git+https://github.com/axioncs/ember"
