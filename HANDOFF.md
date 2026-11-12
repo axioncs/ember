@@ -177,39 +177,68 @@ of the callers of `0x1079640`:
    size 0 is the `0 B` in the install dialog. ember now writes the size from the
    three-argument `setManifestid`.
 
-### Next test (round 2)
+### Round 2 result: installs work
 
-Restart Steam, then install **1222140** first — one depot, small, fast. Then
-1091500 for the size display.
+`Depot plan: synthesised 1 depot(s) for unowned app 1222140` plus
+`handing back 1 depot(s) as success`, then `content_log.txt`:
+`update started : download 0/54953473904` and
+`Downloading 63178 chunks for depot 1222141`. Installs complete. The plan layer is
+done.
 
-```fish
-rg -n 'Depot plan:' ~/.ember.log | tail
-tail -20 ~/.local/share/Steam/logs/content_log.txt
-```
+Two things surfaced, neither a plan bug:
 
-Expected:
+- **"No internet connection" on the first attempt.** The manifest blob was not
+  staged yet, so Steam asked the server for a manifest request code and got
+  `Access Denied` (`CDepotDownloadMgr::BYldRequestDepotManifest ... 'Access
+  Denied'` → `update canceled : Failed downloading 1 manifests (No connection)`).
+  After the blob is in `~/.config/ember/manifests/` the same depot downloads. Note
+  `depotcache` is a staging area: Steam consumes the entry when it mounts the
+  depot, so "missing from depotcache" is not a health check — the store is.
+- **Depot keys are cached in `~/.local/share/Steam/config/config.vdf`** (a
+  `depots` section, 56 keys here), so `GetDepotDecryptionKey` is never denied and
+  `DepotKey: substituted key` never fires. The substitution layer is still
+  unproven end to end; it is masked by that cache, not exercised by it.
 
-```
-Depot plan: synthesised 1 depot(s) for unowned app 1222140
-Depot plan: app 1222140: original returned no plan, handing back 1 depot(s) as success
-```
+### Round 3 change: language filtering
 
-and `content_log.txt` must show `1 mounted depots` and a real download, not
-`0 updated, 0 moved, 0 deleted files`.
+A script pins every depot the app has, one per language pack, so Cyberpunk planned
+to 296 GB. Steam picks by the client's language; ember now does the same:
 
-Readings:
+- language from `HKCU\Software\Valve\Steam\language` in `~/.steam/registry.vdf`
+  (`english` here), read once — changing it needs a client restart anyway.
+- per pinned depot, `depots/<id>/config/language` from appinfo. Empty or
+  unreadable means "cannot tell" and the depot is kept, so a missing appinfo
+  degrades to the previous behaviour instead of dropping content.
+- log: `Depot plan: app %u: %zu of %zu depot(s) localised, %zu dropped for
+  language '%s'`. `localised == 0` means appinfo carried no depot language config
+  at all — that is the line to read first if the size does not shrink.
 
-- `0 B` in the dialog is **expected** for 1222140/1850570/1245620/203160: only the
-  Hubcap script (1091500) carries sizes in its `setManifestid` calls, so those
-  four have nothing to put in `+0x10`. The size is a display estimate; the
-  download is driven by the manifests. 1091500 should show ~318 GB, because its
-  script pins every language pack — depot selection is the next problem, not a
-  bug in the plan.
-- Still `0 mounted depots` with both new lines logged → the plan is accepted but
-  the depots are rejected downstream; next place to look is the depot licence /
-  appinfo path, not this vector.
-- No `handing back` line → the original already returned true, so the gate was
-  never the problem and the mount failure is elsewhere.
+## Remaining work
+
+1. **Depot selection, rest of it.** Language is done. `depots/<id>/optional` and
+   `dlcappid` are the other two filters Steam applies; only worth adding if a
+   title shows up with content that should not be installed.
+2. **Manifest coverage.** 203160 has 0 of 65 pins in the store (11 in depotcache),
+   so it fails with "No connection" until its manifests are imported. User data,
+   not code.
+3. **Depot-key substitution end to end.** Unproven, and currently masked by the
+   key cache in `config.vdf`. To exercise it: remove the depot's entry from that
+   `depots` section, restart, install, and expect
+   `DepotKey: substituted key for depot N (eresult was 15)`.
+4. **`sharedDepots`.** Shared redist depots (228988/228989) are put in `depots`
+   rather than `sharedDepots`; the caller has "already provided by another app"
+   logic for the latter. Correctness nit, no known symptom.
+5. **Publish ember-core.** The flake still points at
+   `git+file:///home/axioncs/.local/share/ember-core?ref=ember`; switch to
+   `github:axioncs/ember-core` once it is pushed.
+6. **Pattern catalog maintenance.** The durable risk: a client update invalidates
+   the byte signatures and the library aborts its own hooks. Needs a
+   re-derivation workflow, not a one-off fix.
+7. **AARCH64.** Patterns exist for it, never built or run.
+8. **`CUtlVector::resize` in `src/sdk/CUtl.hpp` is wrong** — it passes the element
+   count to `Plat_Realloc` as a byte count and never updates `alloc`. Unused
+   today; a trap for the next caller.
+9. **Docs.** No README in either repo; the handoff is the only entry point.
 
 
 
