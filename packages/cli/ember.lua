@@ -317,17 +317,13 @@ local function cmdDoctor()
 	line("stplug-in", string.format("%d script(s), %d app(s), %d key(s), %d pin(s)",
 		#scripts, count(apps), count(keys), count(pins)), #scripts > 0 and "ok" or "info")
 
+	-- depotcache is a staging area: Steam consumes an entry when it mounts the
+	-- depot, so "not in depotcache" is expected and is not a health signal. The
+	-- store is the durable copy.
 	local stored = listFiles(storeDir(), ".manifest")
 	local cached = listFiles(depotCacheDir(), ".manifest")
-	local cachedSet = {}
-	for _, name in ipairs(cached) do cachedSet[name] = true end
-	local missing = 0
-	for _, name in ipairs(stored) do
-		if not cachedSet[name] then missing = missing + 1 end
-	end
-	line("manifest store", string.format("%d file(s), %d not in depotcache", #stored, missing),
-		missing == 0 and "ok" or "warn")
-	line("depotcache", string.format("%d manifest(s)", #cached), "info")
+	line("manifest store", string.format("%d file(s)", #stored), #stored > 0 and "ok" or "info")
+	line("depotcache", string.format("%d manifest(s), staged on demand", #cached), "info")
 
 	local log = sh("tr -d '\\0' < " .. home() .. "/.ember.log 2>/dev/null")
 	if log == "" then
