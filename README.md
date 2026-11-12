@@ -41,19 +41,17 @@ Rebuild. Steam behaves exactly as before, now with ember attached. Setting
 ### Arch and Fedora
 
 ```sh
-git clone https://github.com/axioncs/ember
-cd ember
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
 ```
 
 The script installs build dependencies if they are missing, builds the library,
-and puts a `steam-ember` launcher in `~/.local/bin`. Add `--desktop` to also point
-your Steam desktop entry at it.
+installs the `ember` CLI and a `steam-ember` launcher into the user prefix
+(`~/.local`). Add `--desktop` to also point your Steam desktop entry at it.
+
+No clone needed — the script fetches the sources itself. Set `EMBER_SRC` if you
+want it to build a local checkout instead.
 
 On NixOS the script refuses to run and tells you to use the module instead.
-
-An AUR `PKGBUILD` for Arch lives in [`packaging/aur`](packaging/aur); it is not
-published to the AUR yet.
 
 ### Remove
 
@@ -78,6 +76,7 @@ Then install the game in Steam as usual.
 | `ember list` | Show what is imported and how many manifests are stored |
 | `ember status` | Client, store and depotcache state |
 | `ember doctor` | Full check; the first thing to run when something is wrong |
+| `ember update [--check]` | Update the library and CLI to the latest release |
 
 ### Where things live
 

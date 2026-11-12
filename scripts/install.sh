@@ -1,18 +1,25 @@
 #!/bin/sh
 # ember installer for Arch and Fedora.
 #
-#   ./install.sh              build and install the audit library
-#   ./install.sh --desktop    also shadow the Steam desktop entry
+#   curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
+#
+# Flags:
+#   --desktop     also point the Steam desktop entry at ember
+#   --uninstall   remove everything this script installed
 #
 # NixOS is not supported here; use the flake module instead.
 
 set -eu
 
 REPO="${EMBER_REPO:-https://github.com/axioncs/ember-core}"
+CLI_URL="${EMBER_CLI_URL:-https://raw.githubusercontent.com/axioncs/ember/main/packages/cli/ember.lua}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ember"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DESKTOP=0
 UNINSTALL=0
+
+# Best-effort: the release tag, so `ember update` has something to compare against.
+EMBER_VERSION="${EMBER_VERSION:-$(curl -fsSL https://api.github.com/repos/axioncs/ember/releases/latest 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)}"
 
 for arg in "$@"; do
 	case "$arg" in
@@ -47,7 +54,8 @@ esac
 
 if [ "$UNINSTALL" = 1 ]; then
 	say "removing ember"
-	rm -f "$DATA_DIR/ember-core.so" "$BIN_DIR/steam-ember"
+	rm -f "$DATA_DIR/ember-core.so" "$DATA_DIR/ember.lua" "$DATA_DIR/VERSION"
+	rm -f "$BIN_DIR/steam-ember" "$BIN_DIR/ember"
 	rmdir "$DATA_DIR" 2>/dev/null || true
 
 	entry="$HOME/.local/share/applications/steam.desktop"
@@ -84,13 +92,16 @@ command -v pkg-config >/dev/null 2>&1 || missing="$missing pkg-config"
 pkg-config --exists dbus-1 2>/dev/null || missing="$missing dbus"
 pkg-config --exists libcurl 2>/dev/null || missing="$missing curl"
 [ -f /usr/include/luajit-2.1/lua.hpp ] || missing="$missing luajit"
+command -v unzip >/dev/null 2>&1 || missing="$missing unzip"
 
 if [ -n "$missing" ]; then
 	case "$FAMILY" in
-		arch)   need_pkgs base-devel pkgconf dbus curl luajit ;;
-		fedora) need_pkgs gcc-c++ make pkgconf-pkg-config dbus-devel libcurl-devel luajit-devel ;;
+		arch)   need_pkgs base-devel pkgconf dbus curl luajit lua unzip ;;
+		fedora) need_pkgs gcc-c++ make pkgconf-pkg-config dbus-devel libcurl-devel luajit-devel lua unzip ;;
 	esac
 fi
+
+command -v lua >/dev/null 2>&1 || die "lua is required for the ember command"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -109,6 +120,18 @@ make -C "$work/src" -j"$(nproc)" audit-libs
 say "installing to $DATA_DIR"
 mkdir -p "$DATA_DIR" "$BIN_DIR"
 install -m755 "$work/src/bin/SLSsteam.so" "$DATA_DIR/ember-core.so"
+
+# The CLI is one file; fetching it avoids cloning a second repository.
+say "installing the CLI"
+curl -fsSL "$CLI_URL" -o "$DATA_DIR/ember.lua" || die "could not fetch $CLI_URL"
+
+cat > "$BIN_DIR/ember" <<EOF
+#!/bin/sh
+exec lua "$DATA_DIR/ember.lua" "\$@"
+EOF
+chmod 755 "$BIN_DIR/ember"
+
+printf '%s\n' "${EMBER_VERSION:-unknown}" > "$DATA_DIR/VERSION"
 
 cat > "$BIN_DIR/steam-ember" <<EOF
 #!/bin/sh
@@ -131,5 +154,7 @@ if [ "$DESKTOP" = 1 ]; then
 fi
 
 say "done"
-printf '\n  library:  %s\n  launcher: %s\n\n' "$DATA_DIR/ember-core.so" "$BIN_DIR/steam-ember"
+printf '\n  library:  %s\n  cli:      %s\n  launcher: %s\n\n' \
+	"$DATA_DIR/ember-core.so" "$BIN_DIR/ember" "$BIN_DIR/steam-ember"
 printf 'Launch Steam with `steam-ember`, or re-run with --desktop to make it the default.\n'
+printf 'Then: ember doctor\n'
