@@ -307,6 +307,21 @@ The user confirmed the install dialog and the download are correct.
    during the pre-login window) and the blacklist loop skipped the element swapped
    into a removed slot.
 9. **Docs.** No README in either repo; the handoff is the only entry point.
+10. **No tests.** The stplug-in parser has produced three real bugs (raw-string
+    terminator, three-argument `setManifestid`, filename-as-app-id). A fixture test
+    over `config/stplug-in` samples would have caught all three. Highest-value gap.
+11. **No crash guard.** A bad core means a client that dies at startup, with no way
+    in. A marker written before launch and cleared after hooks place, skipping
+    injection once if it survives, is ~30 lines and no daemon.
+12. **No manifest validation.** `ManifestStore::publish` copies any file named
+    `<depot>_<gid>.manifest` without checking it is a manifest or that the gid
+    matches. A corrupt file lands in depotcache.
+13. **`~/.ember.log` is unbounded.** No rotation.
+14. **No uninstall for the script path.** `install.sh` has no `--uninstall`.
+15. **No config schema version.** A key rename reproduces the ten-warning toast.
+16. ~~**Zip path traversal**~~ — fixed: `ember import` lists entries with
+    `unzip -Z1` and refuses absolute paths, `..`, and drive letters before
+    extracting. Verified with a crafted archive.
 
 
 
@@ -376,6 +391,8 @@ awk '/^14IClientUserMap$/,/^};$/' ~/.ember.log
   offered in swwayps/slsteam-moon#9). Implement independently. That issue is useful
   only as a description of the problem.
 - Do not tell the user to roll Steam back to the 32-bit client. They chose ember.
+- **Do not publish either repo** (no `gh repo create`, no push to a public remote)
+  until the user has verified everything. The flake inputs stay local paths.
 - Verify before claiming. Two guesses in this project were wrong and each cost a
   build-and-click cycle.
 - Terse, mechanism-first reporting; no padding.
