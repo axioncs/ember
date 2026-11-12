@@ -46,7 +46,17 @@ curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.
 
 The script installs build dependencies if they are missing, builds the library,
 installs the `ember` CLI and a `steam-ember` launcher into the user prefix
-(`~/.local`). Add `--desktop` to also point your Steam desktop entry at it.
+(`~/.local`).
+
+Flags go after `sh -s --`, otherwise `sh` swallows them:
+
+```sh
+# also point the Steam desktop entry at ember
+curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh -s -- --desktop
+
+# remove everything the script installed
+curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh -s -- --uninstall
+```
 
 No clone needed — the script fetches the sources itself. Set `EMBER_SRC` if you
 want it to build a local checkout instead.
