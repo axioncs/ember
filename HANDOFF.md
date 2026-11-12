@@ -107,7 +107,11 @@ Nov-2025 `steamrt64/steamclient.so` (single match). Read out of its own code:
 ```
 
 So `CUtlVector<T> = { T* base@0x0, i32 alloc@0x8, i32 growSize@0xC, i32 size@0x10 }`
-(0x18 with padding) — exactly what `src/sdk/CUtl.hpp` already had.
+— exactly what `src/sdk/CUtl.hpp` already had. Note the client's type is 0x18 bytes
+(tail padding), while ember's is 0x14 because `SDK_Class` expands to
+`class __attribute__((packed)) __attribute__((aligned(1)))`. Member offsets are
+identical, which is the whole contract; `apps.cpp` now asserts them with
+`offsetof` instead of `sizeof`.
 
 `DepotInfo_t` is 0x20 bytes, rebuilt from the reset loop at `0x107a480`
 (`movups` 0x8..0x17, `movq` 0x0, `movl` 0x18, `mov` word 0x1C, `movb` 0x1E —
@@ -149,8 +153,10 @@ returns a normal glibc chunk (`malloc_usable_size` = 72), and `Plat_Free`/libc
 `free` accept each other's pointers. So the buffer ember hands over is freed
 correctly whether the vector dies through `IMemAlloc::Free` or bare `free`.
 
-Verified build: `nix build .#core` after the bump; strings in the .so show the new
-`Depot plan:` lines.
+Verified build: `nix build .#core` at ember-core `71027dd`; the `Depot plan:`
+strings are in the .so, and `nix build
+.#nixosConfigurations.nixos.config.programs.steam.package` in `~/nixos` resolves
+`ember-core-0.1.0` (drv `a8ja3f1hnjiiax04rq9v2gvc970hlqhz`) into that closure.
 
 ### Next test (one round)
 
