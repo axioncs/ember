@@ -131,9 +131,8 @@ non-zero on failure.
 ## Compatibility
 
 **Do not run two client hooks at once.** Remove any other Steam library mod before
-enabling ember — the older slsteam-moon / LuaTools stack, a standalone SLSsteam, or
-anything else that loads a library into the client. They share the `stplug-in`
-folder and would both try to own licensing.
+enabling ember — a standalone SLSsteam, or anything else that loads a library into
+the client. They share the `stplug-in` folder and would both try to own licensing.
 
 **Millennium composes.** Its package keeps `override`, so pass it through instead
 of nesting:
