@@ -134,19 +134,17 @@ non-zero on failure.
 enabling ember — a standalone SLSsteam, or anything else that loads a library into
 the client. They share the `stplug-in` folder and would both try to own licensing.
 
-**Millennium composes**, but take it from its own flake, not nixpkgs. nixpkgs'
-`steamWithMillennium` carries only the 32-bit client and 64-bit helper payload,
-so it cannot attach to the SteamRT3 client at all. The upstream flake ships the
-64-bit payload, its runtime paths and the `steamrt64` proxy:
-
-```nix
-inputs.millennium.url = "github:SteamClientHomebrew/Millennium?dir=packages/nix";
-
-programs.ember.steamPackage = inputs.millennium.packages.${pkgs.stdenv.hostPlatform.system}.millennium-steam;
-```
-
-Millennium closes Steam once after its first launch while it enables CEF remote
-debugging; relaunch and it is there.
+**Millennium does not currently work alongside ember.** It injects through a
+`libXtst.so.6` proxy placed in the client's own tree, and every release up to
+3.6.3-beta.1 ships only the 32-bit client payload plus the 64-bit helper
+(`libmillennium_x86.so`, `libmillennium_bootstrap_x86.so`, `hhx64`, `pvs64`).
+There is no `libmillennium_x64.so` and no `libmillennium_bootstrap_x64.so` in
+either the release tarball or the flake, and the flag the flake's x64 derivation
+passes (`-DMILLENNIUM_LINUX_X64=ON`) is consumed by nothing in its CMake tree —
+that derivation fails at configure. ember is 64-bit and lives in the SteamRT3
+client, so the two cannot attach to the same client until Millennium ships an
+x64 payload. Do not switch the client back to 32-bit to accommodate it: ember
+does not load there.
 
 **ember owns `programs.steam.package`.** If another module sets that option too,
 Nix reports conflicting definitions. Use `programs.ember.steamPackage` rather than
