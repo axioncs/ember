@@ -12,7 +12,7 @@ stdenv.mkDerivation {
 
   buildPhase = ''
     runHook preBuild
-    $CC -O2 -shared -fPIC -o ember-cef.so ember-cef.c -ldl
+    $CC -std=gnu11 -O2 -Wall -Wextra -shared -fPIC -o ember-cef.so ember-cef.c -ldl
     runHook postBuild
   '';
 

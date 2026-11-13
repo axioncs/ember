@@ -70,9 +70,10 @@ static void publish_contract(const char *port)
 	snprintf(path, sizeof path, "%s/cef_port", dir);
 
 	unsigned long long ticks = 0;
-	if (FILE *stat = fopen("/proc/self/stat", "r")) {
+	FILE *statfile = fopen("/proc/self/stat", "r");
+	if (statfile) {
 		char buf[4096];
-		if (fgets(buf, sizeof buf, stat)) {
+		if (fgets(buf, sizeof buf, statfile)) {
 			char *close = strrchr(buf, ')');
 			if (close) {
 				/* fields after the comm field: state is 1, so field 22 is
@@ -93,12 +94,13 @@ static void publish_contract(const char *port)
 				}
 			}
 		}
-		fclose(stat);
+		fclose(statfile);
 	}
 
-	if (FILE *out = fopen(path, "w")) {
-		fprintf(out, "%s\nowner %ld %llu\n", port, (long)getpid(), ticks);
-		fclose(out);
+	FILE *outfile = fopen(path, "w");
+	if (outfile) {
+		fprintf(outfile, "%s\nowner %ld %llu\n", port, (long)getpid(), ticks);
+		fclose(outfile);
 	}
 }
 
