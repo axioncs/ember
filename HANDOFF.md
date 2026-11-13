@@ -342,7 +342,16 @@ another app`.
     CEF/CDP injector in this repo — enable the DevTools endpoint, attach over
     WebSocket, inject JS into `SharedJSContext` and the store webviews, and serve
     page calls from the CLI over `Runtime.addBinding`. No third-party framework,
-    no `libXtst` proxy in the client tree. First endpoint: `ember ui`.
+    no `libXtst` proxy in the client tree.
+    - (1) endpoint discovery — done: `ember ui status` reports the marker file,
+      every webhelper's `--remote-debugging-port`, and whether `/json/list`
+      answers. Verified on the live client: 8 webhelpers, none flagged, marker
+      absent, nothing listening on 8080.
+    - (2) the enable lever — open. On the SteamRT3 client the binary carries the
+      `-cef-*` flags but no `cef-enable-remote-debugging` string, so the marker
+      file has to be tested against a real restart before anything is built on it.
+    - (3) WebSocket CDP client, (4) binding + host-side fetch (the store page's
+      CSP blocks a page-side fetch), (5) the badge, then themes.
 10. ~~**No tests.**~~ — done: the parser is now a pure unit
     (`src/feats/stplugin_parse.{hpp,cpp}`) with `tools/test_stplugin.cpp` covering
     every bug that shipped (raw-string terminator, three-argument `setManifestid`,
