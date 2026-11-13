@@ -65,7 +65,7 @@ if [ "$UNINSTALL" = 1 ]; then
 	rmdir "$DATA_DIR" 2>/dev/null || true
 
 	entry="$HOME/.local/share/applications/steam.desktop"
-	if [ -f "$entry" ] && grep -q 'LD_AUDIT=.*ember-core' "$entry"; then
+	if [ -f "$entry" ] && grep -qE 'steam-ember|LD_AUDIT=.*ember-core' "$entry"; then
 		rm -f "$entry"
 		say "removed the desktop override"
 	fi
@@ -201,11 +201,15 @@ chmod 755 "$BIN_DIR/ember"
 # what ember is now, not an extra switch. EMBER_CEF=0 turns the shim off.
 cat > "$BIN_DIR/steam-ember" <<EOF
 #!/bin/sh
+# The badge agent is started here and again by the shim (EMBER_AGENT): the first
+# one covers a launch through this script, the second covers anything that runs
+# the client directly. The agent's lock makes the duplicate a no-op.
 if [ "\${EMBER_CEF:-1}" != 0 ] && [ -f "$DATA_DIR/ember-cef.so" ]; then
 	"$BIN_DIR/ember" ui watch --quiet >/dev/null 2>&1 &
 	exec env LD_AUDIT="$DATA_DIR/ember-core.so" \\
 		LD_PRELOAD="$DATA_DIR/ember-cef.so" \\
 		EMBER_CEF_PORT="\${EMBER_CEF_PORT:-8080}" \\
+		EMBER_AGENT="$BIN_DIR/ember" \\
 		steam "\$@"
 fi
 exec env LD_AUDIT="$DATA_DIR/ember-core.so" steam "\$@"
@@ -221,8 +225,10 @@ if [ "$DESKTOP" = 1 ]; then
 	[ -n "$system_entry" ] || die "no system steam.desktop found; launch with steam-ember instead"
 
 	mkdir -p "$(dirname "$entry")"
-	sed "s|^Exec=steam|Exec=env LD_AUDIT=$DATA_DIR/ember-core.so steam|" \
-		"$system_entry" > "$entry"
+	# Point the entry at the launcher, not at an env-prefixed steam: the badge
+	# agent is started by the launcher, so a desktop-start that bypasses it would
+	# give an ember without a store-page layer.
+	sed "s|^Exec=.*|Exec=$BIN_DIR/steam-ember|" "$system_entry" > "$entry"
 	say "wrote $entry (delete it to revert)"
 fi
 
