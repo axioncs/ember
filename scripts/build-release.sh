@@ -8,7 +8,7 @@
 # (CI uses debian:bookworm, glibc 2.36); building on a rolling distro bakes its
 # glibc in and the artifact then refuses to load on everything older.
 #
-# EMBER_CORE_REF  ember-core branch or tag to build (default: main).
+# EMBER_CORE_REF  ember-core branch or tag to build (default: ember).
 # EMBER_CORE_BIN  package an existing ember-core.so instead of building.
 
 set -eu
@@ -30,8 +30,8 @@ if [ -n "${EMBER_CORE_BIN:-}" ]; then
 else
 	work="$(mktemp -d)"
 	trap 'rm -rf "$work"' EXIT
-	printf 'building ember-core (%s)\n' "${EMBER_CORE_REF:-main}"
-	git clone --depth 1 --branch "${EMBER_CORE_REF:-main}" \
+	printf 'building ember-core (%s)\n' "${EMBER_CORE_REF:-ember}"
+	git clone --depth 1 --branch "${EMBER_CORE_REF:-ember}" \
 		"${EMBER_CORE_REPO:-https://github.com/axioncs/ember-core}" "$work/src"
 	make -C "$work/src" -j"$(nproc)" audit-libs
 	install -m755 "$work/src/bin/SLSsteam.so" "$stage/ember-core.so"
