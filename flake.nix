@@ -40,7 +40,7 @@
         {
           inherit core cefshim cdp;
 
-          cli = pkgs.callPackage ./packages/cli { };
+          cli = pkgs.callPackage ./packages/cli { inherit cdp; };
 
           # Steam with the audit library injected. Usable directly for testing
           # without a system rebuild: nix run .#steam

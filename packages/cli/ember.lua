@@ -21,6 +21,15 @@ local function home()
 	return os.getenv("HOME") or error("HOME is not set")
 end
 
+-- Directory holding this CLI file. Assets shipped beside it (the CDP client, the
+-- badge script) are found relative to it, which is the only lookup that still
+-- works when the agent runs inside Steam's container: no session variables there.
+local function scriptDir()
+	local self = (arg and arg[0]) or ""
+	local dir = self:match("^(.*)/[^/]+$")
+	return dir or "."
+end
+
 local function steamRoot()
 	local h = home()
 	for _, candidate in ipairs({ h .. "/.steam/steam", h .. "/.local/share/Steam" }) do
@@ -623,6 +632,7 @@ local function cdpTool()
 	local override = os.getenv("EMBER_CDPD")
 	if override and override ~= "" and isFile(override) then return override end
 	for _, candidate in ipairs({
+		scriptDir() .. "/ember-cdpd",
 		dataDir() .. "/ember-cdpd",
 		home() .. "/.local/share/ember/ember-cdpd",
 	}) do
@@ -636,6 +646,7 @@ local function badgeAsset()
 	local override = os.getenv("EMBER_BADGE")
 	if override and override ~= "" and isFile(override) then return override end
 	for _, candidate in ipairs({
+		scriptDir() .. "/badge.js",
 		dataDir() .. "/badge.js",
 		home() .. "/.local/share/ember/badge.js",
 		"packages/cdp/badge.js",
@@ -756,6 +767,18 @@ local function cmdUIAttach(appid)
 	return result:match("^ok") and 0 or 1
 end
 
+-- The agent runs detached, inside Steam's container, with stdout on /dev/null.
+-- Without a file there is no way to tell "never started" from "started and
+-- exited", which is exactly the question its own launcher raises.
+local function agentLog(message)
+	local path = configDir() .. "/ui-agent.log"
+	local handle = io.open(path, "a")
+	if handle then
+		handle:write(os.date("[%Y-%m-%d %H:%M:%S] ") .. message .. "\n")
+		handle:close()
+	end
+end
+
 -- Draws on every store page that is open, for as long as the client lives. This
 -- is what makes the badge appear by itself: the launcher starts the agent with
 -- Steam, it re-attaches when a page is created and redraws after a navigation
@@ -770,10 +793,12 @@ local function cmdUIWatch(interval, quiet)
 
 	local asset = badgeAsset()
 	if not asset then
+		agentLog("badge.js missing; scriptDir=" .. scriptDir() .. " dataDir=" .. dataDir())
 		io.stderr:write("ember ui: badge.js is not installed\n")
 		releaseAgent(lock)
 		return 1
 	end
+	agentLog("started pid " .. (selfPid() or "?") .. ", every " .. interval .. "s")
 	if not quiet then print("ember ui: watching store pages every " .. interval .. "s") end
 
 	local tiers = {}
@@ -815,6 +840,7 @@ local function cmdUIWatch(interval, quiet)
 	end
 
 	releaseAgent(lock)
+	agentLog("client gone, exiting")
 	return 0
 end
 
