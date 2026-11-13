@@ -66,13 +66,6 @@ in
 
     environment.systemPackages = [ cfg.cli ];
 
-    # The UI layer ships as a separate package (DevTools client + badge script).
-    # Point the CLI at it: on NixOS nothing lives in ~/.local/share/ember.
-    environment.sessionVariables = {
-      EMBER_CDPD = "${self.packages.${pkgs.stdenv.hostPlatform.system}.cdp}/bin/ember-cdpd";
-      EMBER_BADGE = "${self.packages.${pkgs.stdenv.hostPlatform.system}.cdp}/share/ember/badge.js";
-    };
-
     # extraEnv lands in the FHS profile, which the container init sources. Setting
     # it there rather than in the global environment keeps it scoped to Steam and
     # lets it override any inherited LD_AUDIT.
