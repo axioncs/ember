@@ -85,6 +85,25 @@ ember import ~/Downloads/1245620.lua     # a bare script
 
 Then install the game in Steam as usual.
 
+### Store-page layer (opt-in)
+
+Badges, themes and settings panels are drawn by `steamwebhelper`, not by the
+client, so ember needs a DevTools (CDP) connection to that process. Steam never
+opens that endpoint on its own, so ember ships a small preload shim that adds
+`--remote-debugging-port` when the client spawns the webhelper — and nothing else.
+
+```nix
+programs.ember.cefDebug = true;   # NixOS; cefPort defaults to 8080
+```
+
+```sh
+EMBER_CEF=1 steam-ember           # script installs
+```
+
+Then `ember ui status` shows the endpoint, its owner, and the page targets it can
+see. Off by default on purpose: the port is unauthenticated, so any local process
+can drive the webview while it is open.
+
 | Command | What it does |
 |---|---|
 | `ember import <file.lua\|file.zip>` | Add a game: script, depot keys, manifest pins, manifests |

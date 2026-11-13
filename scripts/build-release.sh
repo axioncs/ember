@@ -40,6 +40,11 @@ fi
 install -m644 "$root/packages/cli/ember.lua" "$stage/ember.lua"
 printf '%s\n' "$tag" > "$stage/VERSION"
 
+# The preload shim ships with the artifact so the script install never needs a
+# compiler: it interposes exec* for the webhelper only.
+${CC:-cc} -O2 -shared -fPIC -o "$stage/ember-cef.so" \
+	"$root/packages/cefshim/ember-cef.c" -ldl
+
 tar czf "$dist/$out" -C "$stage" .
 (cd "$dist" && sha256sum "$out" > "$out.sha256")
 

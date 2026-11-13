@@ -32,6 +32,23 @@ in
       defaultText = lib.literalExpression "ember.packages.\${system}.cli";
       description = "ember command line interface.";
     };
+
+    cefDebug = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Give steamwebhelper a DevTools endpoint, so the UI layer (store-page
+        badges, themes) has something to attach to. Preloads a shim that appends
+        `--remote-debugging-port` when the client spawns the webhelper. It opens
+        a local, unauthenticated debugging port, so it is off by default.
+      '';
+    };
+
+    cefPort = lib.mkOption {
+      type = lib.types.port;
+      default = 8080;
+      description = "Port the DevTools endpoint listens on when cefDebug is enabled.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -58,6 +75,9 @@ in
     programs.steam.package = cfg.steamPackage.override (prev: {
       extraEnv = (prev.extraEnv or { }) // {
         LD_AUDIT = "${cfg.package}/lib/ember/ember-core.so";
+      } // lib.optionalAttrs cfg.cefDebug {
+        LD_PRELOAD = "${self.packages.${pkgs.stdenv.hostPlatform.system}.cefshim}/lib/ember-cef.so";
+        EMBER_CEF_PORT = toString cfg.cefPort;
       };
     });
   };

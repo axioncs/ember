@@ -60,6 +60,7 @@ esac
 if [ "$UNINSTALL" = 1 ]; then
 	say "removing ember"
 	rm -f "$DATA_DIR/ember-core.so" "$DATA_DIR/ember.lua" "$DATA_DIR/VERSION"
+	rm -f "$DATA_DIR/ember-cef.so"
 	rm -f "$BIN_DIR/steam-ember" "$BIN_DIR/ember"
 	rmdir "$DATA_DIR" 2>/dev/null || true
 
@@ -185,14 +186,25 @@ install -m755 "$stage/ember-core.so" "$DATA_DIR/ember-core.so"
 install -m644 "$stage/ember.lua" "$DATA_DIR/ember.lua"
 install -m644 "$stage/VERSION" "$DATA_DIR/VERSION"
 
+# Optional: the preload shim that opens the webhelper's DevTools endpoint.
+[ -f "$stage/ember-cef.so" ] && install -m755 "$stage/ember-cef.so" "$DATA_DIR/ember-cef.so"
+
 cat > "$BIN_DIR/ember" <<EOF
 #!/bin/sh
 exec lua "$DATA_DIR/ember.lua" "\$@"
 EOF
 chmod 755 "$BIN_DIR/ember"
 
+# The shim is opt-in: it opens a local debugging port, and LD_PRELOAD is
+# inherited by every process Steam spawns.
 cat > "$BIN_DIR/steam-ember" <<EOF
 #!/bin/sh
+if [ "\${EMBER_CEF:-0}" = 1 ] && [ -f "$DATA_DIR/ember-cef.so" ]; then
+	exec env LD_AUDIT="$DATA_DIR/ember-core.so" \\
+		LD_PRELOAD="$DATA_DIR/ember-cef.so" \\
+		EMBER_CEF_PORT="\${EMBER_CEF_PORT:-8080}" \\
+		steam "\$@"
+fi
 exec env LD_AUDIT="$DATA_DIR/ember-core.so" steam "\$@"
 EOF
 chmod 755 "$BIN_DIR/steam-ember"
