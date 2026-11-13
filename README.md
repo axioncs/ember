@@ -91,6 +91,7 @@ Then install the game in Steam as usual.
 | `ember remove <appid>` | Drop an imported game and the manifests only it uses |
 | `ember list` | Show what is imported and how many manifests are stored |
 | `ember status` | Client, store and depotcache state |
+| `ember ui [status]` | Store-page injection endpoint: port, targets, what is missing |
 | `ember doctor` | Full check; the first thing to run when something is wrong |
 | `ember update [--check]` | Update the library and CLI to the latest release |
 

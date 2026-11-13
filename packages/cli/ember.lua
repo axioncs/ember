@@ -512,6 +512,115 @@ local function cmdUpdate(checkOnly)
 	return ok_run == true and 0 or 1
 end
 
+-- ---------------------------------------------------------------------------
+-- UI layer: endpoint discovery
+--
+-- Store pages, settings panels and themes are rendered by steamwebhelper, not by
+-- the client process, so anything that changes them needs a Chromium DevTools
+-- (CDP) connection to that process. The endpoint only exists when remote
+-- debugging is enabled; this section finds it and says what is missing, and the
+-- injector is built on the connection it returns.
+-- ---------------------------------------------------------------------------
+
+-- Pulls the port out of a webhelper command line. Pure so the fixture test can
+-- drive it; both spellings occur (`--flag=N` and `--flag N`).
+local function parseDebugPort(raw)
+	if type(raw) ~= "string" then return nil end
+	local value = raw:match("%-%-remote%-debugging%-port=(%d+)")
+	if not value then value = raw:match("%-%-remote%-debugging%-port%s+(%d+)") end
+	if not value then return nil end
+	local port = tonumber(value)
+	if not port or port < 1024 or port > 65535 then return nil end
+	return port
+end
+
+-- Extracts the string fields of every object in a `/json/list` response. A full
+-- JSON decoder for one fixed response shape would be more code than this and no
+-- safer: the only consumer is a status listing.
+local function parseTargets(body)
+	local targets = {}
+	if type(body) ~= "string" then return targets end
+	for object in body:gmatch("{.-}") do
+		local function field(name)
+			return object:match('"' .. name .. '"%s*:%s*"([^"]*)"')
+		end
+		local title = field("title")
+		local url = field("url")
+		if title or url then
+			table.insert(targets, {
+				title = title,
+				url = url,
+				kind = field("type"),
+				ws = field("webSocketDebuggerUrl"),
+			})
+		end
+	end
+	return targets
+end
+
+local function webhelpers()
+	local helpers = {}
+	for pid in sh("pgrep -f 'steamwebhelpe[r]' 2>/dev/null"):gmatch("%d+") do
+		local cmdline = sh("tr '\\0' ' ' < /proc/" .. pid .. "/cmdline 2>/dev/null")
+		table.insert(helpers, { pid = pid, port = parseDebugPort(cmdline) })
+	end
+	return helpers
+end
+
+-- The endpoint the client actually published, and how we know. Without a flag
+-- on some webhelper there is nothing to go on but Steam's default port, which
+-- this reports as an assumption rather than a fact.
+local function cdpEndpoint()
+	local helpers = webhelpers()
+	for _, helper in ipairs(helpers) do
+		if helper.port then
+			return helper.port, "passed to webhelper pid " .. helper.pid
+		end
+	end
+	return 8080, "assumed, no webhelper carries --remote-debugging-port"
+end
+
+local function cmdUI(sub)
+	if sub ~= nil and sub ~= "status" then
+		io.stderr:write("ember ui: unknown subcommand: " .. tostring(sub) .. "\n")
+		return 2
+	end
+
+	local marker = steamRoot() .. "/.cef-enable-remote-debugging"
+	print(string.format("%-18s%s", "marker", isFile(marker) and marker or "absent (" .. marker .. ")"))
+
+	local helpers = webhelpers()
+	if #helpers == 0 then
+		print(string.format("%-18s%s", "webhelper", "not running"))
+	else
+		for _, helper in ipairs(helpers) do
+			print(string.format("%-18s%s", "webhelper",
+				"pid " .. helper.pid .. ", port " .. (helper.port and tostring(helper.port) or "none")))
+		end
+	end
+
+	local port, how = cdpEndpoint()
+	print(string.format("%-18s%s", "endpoint", port .. " (" .. how .. ")"))
+
+	local body = sh("curl -sS --max-time 2 'http://127.0.0.1:" .. port .. "/json/list' 2>/dev/null")
+	local targets = parseTargets(body)
+	if #targets == 0 then
+		print(string.format("%-18s%s", "targets", "none, the endpoint is not answering"))
+		print("")
+		print("The DevTools endpoint is closed. Steam only opens it when remote")
+		print("debugging is enabled, and ember does not enable it yet: the marker")
+		print("and the webhelper flag both have to be checked against the running")
+		print("client before that switch is written.")
+		return 1
+	end
+
+	print(string.format("%-18s%s", "targets", tostring(#targets)))
+	for _, target in ipairs(targets) do
+		print(string.format("  %-9s %s", target.kind or "?", target.title or target.url or "?"))
+	end
+	return 0
+end
+
 local function usage()
 	print([[
 ember — Steam library tooling
@@ -520,9 +629,15 @@ ember — Steam library tooling
   ember remove <appid>               drop an imported app and its manifests
   ember list                         show imported scripts and stored manifests
   ember status                       show client, store and depotcache state
+  ember ui [status]                  show the store-page injection endpoint
   ember doctor                       check the whole stack and say what is wrong
   ember update [--check]             update to the latest release
 ]])
+end
+
+-- Tests load this file for its parsers instead of running a command.
+if os.getenv("EMBER_CLI_LIBRARY_ONLY") then
+	return { parse_debug_port = parseDebugPort, parse_targets = parseTargets }
 end
 
 local command = arg[1]
@@ -538,6 +653,8 @@ elseif command == "doctor" then
 	os.exit(cmdDoctor())
 elseif command == "update" then
 	os.exit(cmdUpdate(arg[2] == "--check"))
+elseif command == "ui" then
+	os.exit(cmdUI(arg[2]))
 else
 	usage()
 	os.exit(command == nil and 0 or 1)

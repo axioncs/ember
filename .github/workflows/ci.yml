@@ -16,3 +16,8 @@ jobs:
         run: |
           sh -n scripts/install.sh
           sh -n scripts/build-release.sh
+      - name: UI parser tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          EMBER_CLI_LIBRARY_ONLY=1 lua5.4 tools/test_ui.lua packages/cli/ember.lua
