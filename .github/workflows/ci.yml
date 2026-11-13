@@ -21,3 +21,5 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lua5.4
           EMBER_CLI_LIBRARY_ONLY=1 lua5.4 tools/test_ui.lua packages/cli/ember.lua
+      - name: CEF shim test
+        run: sh tools/test_cefshim.sh

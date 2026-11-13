@@ -34,9 +34,10 @@
         pkgs:
         let
           core = pkgs.callPackage ./packages/core { src = ember-core; };
+          cefshim = pkgs.callPackage ./packages/cefshim { };
         in
         {
-          inherit core;
+          inherit core cefshim;
 
           cli = pkgs.callPackage ./packages/cli { };
 

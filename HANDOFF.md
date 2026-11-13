@@ -347,9 +347,18 @@ another app`.
       every webhelper's `--remote-debugging-port`, and whether `/json/list`
       answers. Verified on the live client: 8 webhelpers, none flagged, marker
       absent, nothing listening on 8080.
-    - (2) the enable lever — open. On the SteamRT3 client the binary carries the
-      `-cef-*` flags but no `cef-enable-remote-debugging` string, so the marker
-      file has to be tested against a real restart before anything is built on it.
+    - (2) the enable lever — done, verified only on the host. The client has no
+      remote-debugging code at all (no such string in the SteamRT3 binary), so
+      the flag has to be added when the client spawns the webhelper.
+      `packages/cefshim` is a preload shim interposing `execve`/`execv`/`execvp`
+      that appends `--remote-debugging-port` + `--remote-debugging-address` for
+      `steamwebhelper` and publishes `~/.config/ember/cef_port` with the owner
+      pid and start ticks. Host test: `sh tools/test_cefshim.sh` (argv rewritten
+      for the helper, untouched for other children, contract written). Nix wiring
+      verified by evaluating the profile: `LD_AUDIT` + `LD_PRELOAD` +
+      `EMBER_CEF_PORT` all present with `cefDebug = true`.
+      Live test pending: rebuild with `programs.ember.cefDebug = true`, restart
+      Steam, then `ember ui status` should report the contract port and targets.
     - (3) WebSocket CDP client, (4) binding + host-side fetch (the store page's
       CSP blocks a page-side fetch), (5) the badge, then themes.
 10. ~~**No tests.**~~ — done: the parser is now a pure unit

@@ -567,10 +567,46 @@ local function webhelpers()
 	return helpers
 end
 
+-- The shim publishes the endpoint it opened, with the owner pid and the kernel's
+-- start ticks (field 22 of /proc/<pid>/stat) so a file left behind by a previous
+-- session cannot be mistaken for a live one.
+local function readContract()
+	local text = readFile(configDir() .. "/cef_port")
+	if not text then return nil end
+	local port = tonumber(text:match("^%s*(%d+)"))
+	if not port or port < 1024 or port > 65535 then return nil end
+
+	local pid, ticks = text:match("owner%s+(%d+)%s+(%d+)")
+	if pid then
+		local stat = readFile("/proc/" .. pid .. "/stat")
+		if not stat then return nil end
+		local rest = stat:match("%)%s+(.*)$")
+		if rest then
+			-- The state field is 3, so field 22 is the 20th token after the comm.
+			local index, live = 1, nil
+			for value in rest:gmatch("%S+") do
+				if index == 20 then
+					live = value
+					break
+				end
+				index = index + 1
+			end
+			if live ~= nil and live ~= ticks then return nil end
+		end
+	end
+
+	local how = "contract " .. configDir() .. "/cef_port"
+	if pid then how = how .. " (pid " .. pid .. ")" end
+	return port, how
+end
+
 -- The endpoint the client actually published, and how we know. Without a flag
 -- on some webhelper there is nothing to go on but Steam's default port, which
 -- this reports as an assumption rather than a fact.
 local function cdpEndpoint()
+	local port, how = readContract()
+	if port then return port, how end
+
 	local helpers = webhelpers()
 	for _, helper in ipairs(helpers) do
 		if helper.port then
