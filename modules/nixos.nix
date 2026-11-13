@@ -51,10 +51,15 @@ in
     # extraEnv lands in the FHS profile, which the container init sources. Setting
     # it there rather than in the global environment keeps it scoped to Steam and
     # lets it override any inherited LD_AUDIT.
-    programs.steam.package = cfg.steamPackage.override {
-      extraEnv = {
+    #
+    # Function form on purpose: an attribute-set override replaces extraEnv
+    # wholesale, which would drop whatever another Steam wrapper put there
+    # (Millennium's runtime paths, for one). Applying the function to the
+    # previous arguments merges instead.
+    programs.steam.package = cfg.steamPackage.override (prev: {
+      extraEnv = (prev.extraEnv or { }) // {
         LD_AUDIT = "${cfg.package}/lib/ember/ember-core.so";
       };
-    };
+    });
   };
 }

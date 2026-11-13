@@ -134,12 +134,19 @@ non-zero on failure.
 enabling ember — a standalone SLSsteam, or anything else that loads a library into
 the client. They share the `stplug-in` folder and would both try to own licensing.
 
-**Millennium composes.** Its package keeps `override`, so pass it through instead
-of nesting:
+**Millennium composes**, but take it from its own flake, not nixpkgs. nixpkgs'
+`steamWithMillennium` carries only the 32-bit client and 64-bit helper payload,
+so it cannot attach to the SteamRT3 client at all. The upstream flake ships the
+64-bit payload, its runtime paths and the `steamrt64` proxy:
 
 ```nix
-programs.ember.steamPackage = pkgs.steamWithMillennium;
+inputs.millennium.url = "github:SteamClientHomebrew/Millennium?dir=packages/nix";
+
+programs.ember.steamPackage = inputs.millennium.packages.${pkgs.stdenv.hostPlatform.system}.millennium-steam;
 ```
+
+Millennium closes Steam once after its first launch while it enables CEF remote
+debugging; relaunch and it is there.
 
 **ember owns `programs.steam.package`.** If another module sets that option too,
 Nix reports conflicting definitions. Use `programs.ember.steamPackage` rather than
