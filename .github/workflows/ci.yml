@@ -13,4 +13,6 @@ jobs:
       - name: Lua 5.4 const check
         run: python3 tools/lint-lua.py packages/cli/ember.lua
       - name: Shell syntax
-        run: sh -n scripts/install.sh
+        run: |
+          sh -n scripts/install.sh
+          sh -n scripts/build-release.sh

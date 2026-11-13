@@ -42,7 +42,7 @@ in
       }
       {
         assertion = cfg.steamPackage ? override;
-        message = "programs.ember.steamPackage must be an overridable Steam package (one built with pkgs.steam.override, e.g. pkgs.steamWithMillennium).";
+        message = "programs.ember.steamPackage must be an overridable Steam package (one built with pkgs.steam.override).";
       }
     ];
 
@@ -53,9 +53,8 @@ in
     # lets it override any inherited LD_AUDIT.
     #
     # Function form on purpose: an attribute-set override replaces extraEnv
-    # wholesale, which would drop whatever another Steam wrapper put there
-    # (Millennium's runtime paths, for one). Applying the function to the
-    # previous arguments merges instead.
+    # wholesale, which would drop whatever another Steam wrapper put there.
+    # Applying the function to the previous arguments merges instead.
     programs.steam.package = cfg.steamPackage.override (prev: {
       extraEnv = (prev.extraEnv or { }) // {
         LD_AUDIT = "${cfg.package}/lib/ember/ember-core.so";

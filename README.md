@@ -44,18 +44,24 @@ Rebuild. Steam behaves exactly as before, now with ember attached. Setting
 curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
 ```
 
-The script installs build dependencies if they are missing, builds the library,
-installs the `ember` CLI and a `steam-ember` launcher into the user prefix
-(`~/.local`).
+The script downloads the release artifact for the latest tag — built in a
+`debian:bookworm` container, so the library needs nothing newer than glibc 2.36 —
+verifies its published SHA-256, and installs the `ember` CLI and a `steam-ember`
+launcher into the user prefix (`~/.local`). If there is no artifact for your tag
+it builds from source instead, installing the build dependencies only then;
+`--from-source` forces that.
 
 Flags go after `sh -s --`, otherwise `sh` swallows them:
 
 ```sh
 # also point the Steam desktop entry at ember
-curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh -s -- --desktop
+curl -fsSL ... | sh -s -- --desktop
+
+# build here instead of downloading the release
+curl -fsSL ... | sh -s -- --from-source
 
 # remove everything the script installed
-curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh -s -- --uninstall
+curl -fsSL ... | sh -s -- --uninstall
 ```
 
 No clone needed — the script fetches the sources itself. Set `EMBER_SRC` if you
@@ -134,17 +140,11 @@ non-zero on failure.
 enabling ember — a standalone SLSsteam, or anything else that loads a library into
 the client. They share the `stplug-in` folder and would both try to own licensing.
 
-**Millennium does not currently work alongside ember.** It injects through a
-`libXtst.so.6` proxy placed in the client's own tree, and every release up to
-3.6.3-beta.1 ships only the 32-bit client payload plus the 64-bit helper
-(`libmillennium_x86.so`, `libmillennium_bootstrap_x86.so`, `hhx64`, `pvs64`).
-There is no `libmillennium_x64.so` and no `libmillennium_bootstrap_x64.so` in
-either the release tarball or the flake, and the flag the flake's x64 derivation
-passes (`-DMILLENNIUM_LINUX_X64=ON`) is consumed by nothing in its CMake tree —
-that derivation fails at configure. ember is 64-bit and lives in the SteamRT3
-client, so the two cannot attach to the same client until Millennium ships an
-x64 payload. Do not switch the client back to 32-bit to accommodate it: ember
-does not load there.
+**ember does not modify Steam's UI yet.** Store-page badges, themes and settings
+panels are rendered by a CEF/CDP injector speaking to the webhelper's DevTools
+endpoint, not by a client hook; ember will grow that layer itself, in this repo
+(`ember ui`). Until it lands there is nothing to enable and no third-party
+framework to install.
 
 **ember owns `programs.steam.package`.** If another module sets that option too,
 Nix reports conflicting definitions. Use `programs.ember.steamPackage` rather than
