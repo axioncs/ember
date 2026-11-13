@@ -14,7 +14,7 @@ trap 'rm -rf "$work"' EXIT
 
 if [ -z "$so" ]; then
 	so="$work/ember-cef.so"
-	cc -O2 -shared -fPIC -o "$so" "$root/packages/cefshim/ember-cef.c" -ldl
+	cc -std=gnu11 -O2 -Wall -Wextra -shared -fPIC -o "$so" "$root/packages/cefshim/ember-cef.c" -ldl
 fi
 
 mkdir -p "$work/home" "$work/bin"

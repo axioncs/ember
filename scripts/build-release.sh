@@ -42,11 +42,11 @@ printf '%s\n' "$tag" > "$stage/VERSION"
 
 # The preload shim ships with the artifact so the script install never needs a
 # compiler: it interposes exec* for the webhelper only.
-${CC:-cc} -O2 -shared -fPIC -o "$stage/ember-cef.so" \
+${CC:-cc} -std=gnu11 -O2 -Wall -Wextra -shared -fPIC -o "$stage/ember-cef.so" \
 	"$root/packages/cefshim/ember-cef.c" -ldl
 
 # The DevTools client and the badge script the UI layer needs at runtime.
-${CC:-cc} -O2 -Wall -o "$stage/ember-cdpd" "$root/packages/cdp/ember-cdpd.c"
+${CC:-cc} -std=gnu11 -O2 -Wall -Wextra -o "$stage/ember-cdpd" "$root/packages/cdp/ember-cdpd.c"
 install -m644 "$root/packages/cdp/badge.js" "$stage/badge.js"
 
 tar czf "$dist/$out" -C "$stage" .
