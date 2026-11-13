@@ -4,6 +4,8 @@
   lua5_4,
   unzip,
   curl,
+  coreutils,
+  procps,
   makeWrapper,
 }:
 stdenv.mkDerivation {
@@ -20,7 +22,7 @@ stdenv.mkDerivation {
     install -m644 ember.lua $out/share/ember/ember.lua
     makeWrapper ${lua5_4}/bin/lua $out/bin/ember \
       --add-flags "$out/share/ember/ember.lua" \
-      --prefix PATH : ${lib.makeBinPath [ unzip curl ]}
+      --prefix PATH : ${lib.makeBinPath [ unzip curl coreutils procps ]}
     runHook postInstall
   '';
 

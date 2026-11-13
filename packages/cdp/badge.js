@@ -33,6 +33,9 @@
 	var colour = COLORS[tier] || COLORS.pending;
 
 	var pill = document.getElementById(KEY);
+	// Already drawn for this tier: nothing to do. The agent runs every couple of
+	// seconds, so this is what keeps it from rewriting the DOM constantly.
+	if (pill && pill.getAttribute("data-ember-tier") === tier) return "keep";
 	if (!pill) {
 		// Steam's store header keeps links to the hub and friends in this row;
 		// fall back to the title block, then to a fixed badge, so a markup change
@@ -83,6 +86,7 @@
 	}
 
 	pill.href = "https://www.protondb.com/app/" + APPID;
+	pill.setAttribute("data-ember-tier", tier);
 	pill.title = "ProtonDB: " + (LABELS[tier] || tier) +
 		(TIER && typeof TIER.total === "number" && TIER.total > 0
 			? " (" + TIER.total + " reports)"

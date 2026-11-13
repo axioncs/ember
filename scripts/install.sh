@@ -197,11 +197,12 @@ exec lua "$DATA_DIR/ember.lua" "\$@"
 EOF
 chmod 755 "$BIN_DIR/ember"
 
-# The shim is opt-in: it opens a local debugging port, and LD_PRELOAD is
-# inherited by every process Steam spawns.
+# The shim and the badge agent are on by default: the store-page layer is part of
+# what ember is now, not an extra switch. EMBER_CEF=0 turns the shim off.
 cat > "$BIN_DIR/steam-ember" <<EOF
 #!/bin/sh
-if [ "\${EMBER_CEF:-0}" = 1 ] && [ -f "$DATA_DIR/ember-cef.so" ]; then
+if [ "\${EMBER_CEF:-1}" != 0 ] && [ -f "$DATA_DIR/ember-cef.so" ]; then
+	"$BIN_DIR/ember" ui watch --quiet >/dev/null 2>&1 &
 	exec env LD_AUDIT="$DATA_DIR/ember-core.so" \\
 		LD_PRELOAD="$DATA_DIR/ember-cef.so" \\
 		EMBER_CEF_PORT="\${EMBER_CEF_PORT:-8080}" \\
