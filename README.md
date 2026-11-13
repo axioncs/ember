@@ -101,8 +101,10 @@ EMBER_CEF=1 steam-ember           # script installs
 ```
 
 Then `ember ui status` shows the endpoint, its owner, and the page targets it can
-see. Off by default on purpose: the port is unauthenticated, so any local process
-can drive the webview while it is open.
+see. With a store page open, `ember ui attach` draws the ProtonDB pill on it and
+`ember ui watch` keeps it up to date as you browse. Off by default on purpose: the
+port is unauthenticated, so any local process can drive the webview while it is
+open.
 
 | Command | What it does |
 |---|---|
@@ -111,6 +113,8 @@ can drive the webview while it is open.
 | `ember list` | Show what is imported and how many manifests are stored |
 | `ember status` | Client, store and depotcache state |
 | `ember ui [status]` | Store-page injection endpoint: port, targets, what is missing |
+| `ember ui attach [appid]` | Draw the ProtonDB pill on the open store page |
+| `ember ui watch [seconds]` | Keep drawing it as pages change (default 3s) |
 | `ember doctor` | Full check; the first thing to run when something is wrong |
 | `ember update [--check]` | Update the library and CLI to the latest release |
 
