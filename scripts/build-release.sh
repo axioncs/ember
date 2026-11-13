@@ -45,6 +45,10 @@ printf '%s\n' "$tag" > "$stage/VERSION"
 ${CC:-cc} -O2 -shared -fPIC -o "$stage/ember-cef.so" \
 	"$root/packages/cefshim/ember-cef.c" -ldl
 
+# The DevTools client and the badge script the UI layer needs at runtime.
+${CC:-cc} -O2 -Wall -o "$stage/ember-cdpd" "$root/packages/cdp/ember-cdpd.c"
+install -m644 "$root/packages/cdp/badge.js" "$stage/badge.js"
+
 tar czf "$dist/$out" -C "$stage" .
 (cd "$dist" && sha256sum "$out" > "$out.sha256")
 

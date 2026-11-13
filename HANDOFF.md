@@ -359,8 +359,19 @@ another app`.
       `EMBER_CEF_PORT` all present with `cefDebug = true`.
       Live test pending: rebuild with `programs.ember.cefDebug = true`, restart
       Steam, then `ember ui status` should report the contract port and targets.
-    - (3) WebSocket CDP client, (4) binding + host-side fetch (the store page's
-      CSP blocks a page-side fetch), (5) the badge, then themes.
+    - (3) WebSocket CDP client — done, verified live. `packages/cdp/ember-cdpd.c`
+      is a one-shot client (own SHA-1/base64 handshake, masked frames, ping→pong)
+      because the Lua CLI cannot open a socket. `Runtime.evaluate` against the real
+      `SharedJSContext` returns numbers, strings and object literals correctly.
+    - (4) data path — the store page's CSP blocks a page-side fetch (verified:
+      `fetch(protondb)` fails, `fetch(api.steampowered.com)` reaches the server), so
+      the tier is fetched by the CLI with curl and injected as a JSON literal. No
+      binding, no daemon: one evaluate to find the appid, one to draw the pill.
+    - (5) badge — done, verified live on the store page: `ember ui attach` printed
+      `app 1091500: ok: gold` and the DOM carried
+      `ProtonDB: Gold | ProtonDB: Gold (2797 reports)`.
+    - Themes are next: same transport, a CSS injection per target instead of an
+      element.
 10. ~~**No tests.**~~ — done: the parser is now a pure unit
     (`src/feats/stplugin_parse.{hpp,cpp}`) with `tools/test_stplugin.cpp` covering
     every bug that shipped (raw-string terminator, three-argument `setManifestid`,

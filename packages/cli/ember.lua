@@ -616,7 +616,135 @@ local function cdpEndpoint()
 	return 8080, "assumed, no webhelper carries --remote-debugging-port"
 end
 
-local function cmdUI(sub)
+-- Where the pieces of the UI layer live. The release artifact puts the CDP
+-- client and the badge script beside the CLI; a source checkout has them under
+-- packages/. Neither is required for the rest of the CLI to work.
+local function cdpTool()
+	local override = os.getenv("EMBER_CDPD")
+	if override and override ~= "" and isFile(override) then return override end
+	for _, candidate in ipairs({
+		dataDir() .. "/ember-cdpd",
+		home() .. "/.local/share/ember/ember-cdpd",
+	}) do
+		if isFile(candidate) then return candidate end
+	end
+	local found = trim(sh("command -v ember-cdpd 2>/dev/null"))
+	return found ~= "" and found or nil
+end
+
+local function badgeAsset()
+	local override = os.getenv("EMBER_BADGE")
+	if override and override ~= "" and isFile(override) then return override end
+	for _, candidate in ipairs({
+		dataDir() .. "/badge.js",
+		home() .. "/.local/share/ember/badge.js",
+		"packages/cdp/badge.js",
+	}) do
+		if isFile(candidate) then return candidate end
+	end
+	return nil
+end
+
+-- The store page ember can draw on. Steam keeps one webview per page it has
+-- visited, so several may match; the last one in the list is the newest.
+local function storeTarget(appid)
+	local body = sh("curl -sS --max-time 2 'http://127.0.0.1:8080/json/list' 2>/dev/null")
+	local chosen
+	for _, target in ipairs(parseTargets(body)) do
+		local id = (target.url or ""):match("^https://store%.steampowered%.com/app/(%d+)")
+		if id and target.ws and (not appid or id == appid) then
+			chosen = { appid = id, ws = target.ws, url = target.url }
+		end
+	end
+	return chosen
+end
+
+-- Runs the CDP client against a JS file and returns what the page returned.
+local function evaluateFile(ws, path)
+	local binary = cdpTool()
+	if not binary then return nil, "ember-cdpd is not installed" end
+
+	local out = os.tmpname()
+	local saved = os.tmpname()
+	local captured = io.open(saved, "w")
+	if captured then captured:close() end
+
+	local ran = ok(
+		("'%s' --ws '%s' --eval-file '%s' > '%s' 2>'%s'"):format(binary, ws, path, out, saved)
+	)
+	local text = trim(readFile(out) or "")
+	local err = trim(readFile(saved) or "")
+	os.remove(out)
+	os.remove(saved)
+	if not ran and text == "" then return nil, err ~= "" and err or "no response from the page" end
+	return text
+end
+
+-- The tier, fetched here rather than in the page: the store page's CSP refuses
+-- the request (verified: `fetch(protondb)` fails, `fetch(api.steampowered.com)`
+-- passes), and a host-side fetch has no such restriction.
+local function protondbTier(appid)
+	local body = sh(("curl -fsS --max-time 6 'https://www.protondb.com/api/v1/reports/summaries/%s.json' 2>/dev/null"):format(appid))
+	if body == "" then return nil end
+	local tier = body:match('"tier"%s*:%s*"([%w_]+)"')
+	if not tier then return nil end
+	return tier, (body:gsub("[\r\n]+", " "))
+end
+
+local function renderBadge(target)
+	local asset = badgeAsset()
+	if not asset then return nil, "badge.js is not installed" end
+	local template = readFile(asset)
+	if not template then return nil, "cannot read " .. asset end
+
+	local _, json_or_nil = protondbTier(target.appid)
+	local source = (template:gsub("__EMBER_APPID__", target.appid))
+	source = (source:gsub("__EMBER_TIER_JSON__", function() return json_or_nil or "null" end))
+
+	local path = os.tmpname()
+	local handle = io.open(path, "w")
+	if not handle then return nil, "cannot write a temporary script" end
+	handle:write(source)
+	handle:close()
+
+	local result, err = evaluateFile(target.ws, path)
+	os.remove(path)
+	return result, err
+end
+
+local function cmdUIAttach(appid)
+	local target = storeTarget(appid)
+	if not target then
+		io.stderr:write("ember ui: no store app page is open in Steam; open one and retry\n")
+		return 1
+	end
+	local result, err = renderBadge(target)
+	if not result then
+		io.stderr:write("ember ui: " .. tostring(err) .. "\n")
+		return 1
+	end
+	print(("app %s: %s"):format(target.appid, result))
+	return result:match("^ok") and 0 or 1
+end
+
+local function cmdUIWatch(interval)
+	interval = interval or 3
+	print("watching store pages every " .. interval .. "s; ctrl-c to stop")
+	local last
+	while true do
+		local target = storeTarget()
+		if target and target.appid ~= last then
+			local result = renderBadge(target)
+			print(("app %s: %s"):format(target.appid, tostring(result)))
+			last = target.appid
+		end
+		os.execute("sleep " .. interval)
+	end
+end
+
+local function cmdUI(sub, arg2)
+	if sub == "attach" then return cmdUIAttach(arg2) end
+	if sub == "watch" then return cmdUIWatch(arg2 and tonumber(arg2) or nil) end
 	if sub ~= nil and sub ~= "status" then
 		io.stderr:write("ember ui: unknown subcommand: " .. tostring(sub) .. "\n")
 		return 2
@@ -690,7 +818,7 @@ elseif command == "doctor" then
 elseif command == "update" then
 	os.exit(cmdUpdate(arg[2] == "--check"))
 elseif command == "ui" then
-	os.exit(cmdUI(arg[2]))
+	os.exit(cmdUI(arg[2], arg[3]))
 else
 	usage()
 	os.exit(command == nil and 0 or 1)
