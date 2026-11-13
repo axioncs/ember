@@ -66,7 +66,7 @@ static void publish_contract(const char *port)
 	snprintf(dir, sizeof dir, "%s/.config/ember", home);
 	mkdir(dir, 0700);
 
-	char path[4096];
+	char path[4200];
 	snprintf(path, sizeof path, "%s/cef_port", dir);
 
 	unsigned long long ticks = 0;
@@ -123,13 +123,40 @@ static char **augment(char *const argv[])
 	return grown;
 }
 
+/* Starts the badge agent once per client process. The client is the only process
+ * guaranteed to run, so it is also the natural parent: no unit, no wrapper.
+ * fork() in a threaded process is only safe for async-signal-safe calls in the
+ * child until exec, which is all this does. */
+static void start_agent(void)
+{
+	static int started = 0;
+	if (started)
+		return;
+	const char *agent = getenv("EMBER_AGENT");
+	if (!agent || !*agent)
+		return;
+	started = 1;
+
+	pid_t pid = fork();
+	if (pid != 0)
+		return; /* parent, or fork failed: the endpoint still works, the badge waits */
+
+	setsid();
+	unsetenv("LD_PRELOAD");
+	unsetenv("LD_AUDIT");
+	execl(agent, agent, "ui", "watch", "--quiet", (char *)NULL);
+	_exit(127);
+}
+
 static char **rewrite(const char *path, char *const argv[])
 {
 	if (!base_is_helper(path) || already_flagged(argv))
 		return NULL;
 	char **grown = augment(argv);
-	if (grown)
+	if (grown) {
 		publish_contract(cef_port());
+		start_agent();
+	}
 	return grown;
 }
 

@@ -85,26 +85,31 @@ ember import ~/Downloads/1245620.lua     # a bare script
 
 Then install the game in Steam as usual.
 
-### Store-page layer (opt-in)
+### Store-page layer
 
 Badges, themes and settings panels are drawn by `steamwebhelper`, not by the
 client, so ember needs a DevTools (CDP) connection to that process. Steam never
 opens that endpoint on its own, so ember ships a small preload shim that adds
 `--remote-debugging-port` when the client spawns the webhelper — and nothing else.
 
+It is on by default. The shim starts the badge agent the first time the client
+spawns a webhelper, so opening any store app page draws the ProtonDB pill within
+a couple of seconds, and a navigation redraws it. No unit, no daemon, nothing to
+remember.
+
 ```nix
-programs.ember.cefDebug = true;   # NixOS; cefPort defaults to 8080
+programs.ember.cefDebug = false;   # NixOS, to leave the webhelper untouched
+programs.ember.cefPort = 9090;     # optional, default 8080
 ```
 
 ```sh
-EMBER_CEF=1 steam-ember           # script installs
+EMBER_CEF=0 steam-ember            # script installs: same switch on the launcher
 ```
 
-Then `ember ui status` shows the endpoint, its owner, and the page targets it can
-see. With a store page open, `ember ui attach` draws the ProtonDB pill on it and
-`ember ui watch` keeps it up to date as you browse. Off by default on purpose: the
-port is unauthenticated, so any local process can drive the webview while it is
-open.
+`ember ui status` reports the endpoint when it is not working, and
+`ember ui attach` draws once by hand. The port is unauthenticated, so any local
+process can drive the webview while it is open — that is the cost of the layer,
+and the reason `cefDebug = false` exists.
 
 | Command | What it does |
 |---|---|

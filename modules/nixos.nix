@@ -35,12 +35,13 @@ in
 
     cefDebug = lib.mkOption {
       type = lib.types.bool;
-      default = false;
+      default = true;
       description = ''
-        Give steamwebhelper a DevTools endpoint, so the UI layer (store-page
-        badges, themes) has something to attach to. Preloads a shim that appends
-        `--remote-debugging-port` when the client spawns the webhelper. It opens
-        a local, unauthenticated debugging port, so it is off by default.
+        Give steamwebhelper a DevTools endpoint, so the store-page layer (badges,
+        themes) has something to attach to: preloads a shim that appends
+        `--remote-debugging-port` when the client spawns the webhelper, and starts
+        the badge agent alongside Steam. It opens a local, unauthenticated
+        debugging port; set this to false to leave the webhelper untouched.
       '';
     };
 
@@ -85,6 +86,9 @@ in
       } // lib.optionalAttrs cfg.cefDebug {
         LD_PRELOAD = "${self.packages.${pkgs.stdenv.hostPlatform.system}.cefshim}/lib/ember-cef.so";
         EMBER_CEF_PORT = toString cfg.cefPort;
+        # The shim starts the badge agent the first time the client spawns the
+        # webhelper, so no unit or wrapper is needed to keep it running.
+        EMBER_AGENT = "${cfg.cli}/bin/ember";
       };
     });
   };

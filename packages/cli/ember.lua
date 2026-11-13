@@ -691,25 +691,54 @@ local function protondbTier(appid)
 	return tier, (body:gsub("[\r\n]+", " "))
 end
 
-local function renderBadge(target)
-	local asset = badgeAsset()
-	if not asset then return nil, "badge.js is not installed" end
+local function selfPid()
+	local stat = readFile("/proc/self/stat")
+	return stat and stat:match("^(%d+)") or nil
+end
+
+-- One agent per user. mkdir is atomic; a lock whose pid is gone is stale.
+local function claimAgent()
+	local dir = configDir() .. "/ui-agent.lock"
+	local pidfile = dir .. "/pid"
+	local existing = trim(readFile(pidfile) or "")
+	if existing ~= "" and isDir("/proc/" .. existing) then return nil end
+	ok("rm -rf '" .. dir .. "'")
+	if not ok("mkdir -p '" .. dir .. "'") then return nil end
+	local handle = io.open(pidfile, "w")
+	if handle then
+		handle:write((selfPid() or "0") .. "\n")
+		handle:close()
+	end
+	return dir
+end
+
+local function releaseAgent(dir) ok("rm -rf '" .. dir .. "'") end
+
+local function buildBadgeSource(asset, appid, tierJson)
 	local template = readFile(asset)
-	if not template then return nil, "cannot read " .. asset end
+	if not template then return nil end
+	local source = (template:gsub("__EMBER_APPID__", appid))
+	return (source:gsub("__EMBER_TIER_JSON__", function() return tierJson or "null" end))
+end
 
-	local _, json_or_nil = protondbTier(target.appid)
-	local source = (template:gsub("__EMBER_APPID__", target.appid))
-	source = (source:gsub("__EMBER_TIER_JSON__", function() return json_or_nil or "null" end))
-
+local function evaluateSource(ws, source)
 	local path = os.tmpname()
 	local handle = io.open(path, "w")
 	if not handle then return nil, "cannot write a temporary script" end
 	handle:write(source)
 	handle:close()
-
-	local result, err = evaluateFile(target.ws, path)
+	local result, err = evaluateFile(ws, path)
 	os.remove(path)
 	return result, err
+end
+
+local function renderBadge(target)
+	local asset = badgeAsset()
+	if not asset then return nil, "badge.js is not installed" end
+	local _, json = protondbTier(target.appid)
+	local source = buildBadgeSource(asset, target.appid, json)
+	if not source then return nil, "cannot read " .. asset end
+	return evaluateSource(target.ws, source)
 end
 
 local function cmdUIAttach(appid)
@@ -727,24 +756,75 @@ local function cmdUIAttach(appid)
 	return result:match("^ok") and 0 or 1
 end
 
-local function cmdUIWatch(interval)
-	interval = interval or 3
-	print("watching store pages every " .. interval .. "s; ctrl-c to stop")
-	local last
+-- Draws on every store page that is open, for as long as the client lives. This
+-- is what makes the badge appear by itself: the launcher starts the agent with
+-- Steam, it re-attaches when a page is created and redraws after a navigation
+-- replaces the header. Exits when the client is gone, so nothing lingers.
+local function cmdUIWatch(interval, quiet)
+	interval = interval or 2
+	local lock = claimAgent()
+	if not lock then
+		if not quiet then print("ember ui: an agent is already running") end
+		return 0
+	end
+
+	local asset = badgeAsset()
+	if not asset then
+		io.stderr:write("ember ui: badge.js is not installed\n")
+		releaseAgent(lock)
+		return 1
+	end
+	if not quiet then print("ember ui: watching store pages every " .. interval .. "s") end
+
+	local tiers = {}
+	local seen_client, idle = false, 0
 	while true do
-		local target = storeTarget()
-		if target and target.appid ~= last then
-			local result = renderBadge(target)
-			print(("app %s: %s"):format(target.appid, tostring(result)))
-			last = target.appid
+		-- Started by the launcher, which runs before the client is up: give it a
+		-- grace window rather than exiting on the first empty check.
+		if ok("pgrep -f 'steamrt64/stea[m]' >/dev/null 2>&1") then
+			seen_client = true
+			idle = 0
+		elseif seen_client then
+			break
+		else
+			idle = idle + 1
+			if idle * interval > 120 then break end
 		end
+
+		local body = sh("curl -sS --max-time 2 'http://127.0.0.1:8080/json/list' 2>/dev/null")
+		for _, target in ipairs(parseTargets(body)) do
+			local appid = (target.url or ""):match("^https://store%.steampowered%.com/app/(%d+)")
+			if appid and target.ws then
+				local cached = tiers[appid]
+				if not cached then
+					local seen, json = protondbTier(appid)
+					cached = { json = json, tier = seen }
+					tiers[appid] = cached
+				end
+				local source = buildBadgeSource(asset, appid, cached.json)
+				if source then
+					local result = evaluateSource(target.ws, source)
+					if result and not result:match("^keep") and not quiet then
+						print(("app %s: %s"):format(appid, result))
+					end
+				end
+			end
+		end
+
 		os.execute("sleep " .. interval)
 	end
+
+	releaseAgent(lock)
+	return 0
 end
 
 local function cmdUI(sub, arg2)
 	if sub == "attach" then return cmdUIAttach(arg2) end
-	if sub == "watch" then return cmdUIWatch(arg2 and tonumber(arg2) or nil) end
+	if sub == "watch" then
+		local quiet = (arg2 == "--quiet") or (arg3 == "--quiet")
+		local seconds = tonumber(arg2) or (arg3 and tonumber(arg3))
+		return cmdUIWatch(seconds, quiet)
+	end
 	if sub ~= nil and sub ~= "status" then
 		io.stderr:write("ember ui: unknown subcommand: " .. tostring(sub) .. "\n")
 		return 2

@@ -370,8 +370,15 @@ another app`.
     - (5) badge — done, verified live on the store page: `ember ui attach` printed
       `app 1091500: ok: gold` and the DOM carried
       `ProtonDB: Gold | ProtonDB: Gold (2797 reports)`.
-    - Themes are next: same transport, a CSS injection per target instead of an
-      element.
+    - Badge autostart — done, no unit and no wrapper. The shim calls `start_agent()`
+      on the first webhelper spawn: fork + setsid + exec `$EMBER_AGENT ui watch
+      --quiet`, once per client process (a static flag guards it, the agent also
+      holds a lock). The NixOS module sets `EMBER_AGENT` to the CLI and `cefDebug`
+      now defaults to true. Verified on the host that the shim spawns it exactly
+      once; the agent itself was verified live: a store page opened after it
+      started got the pill by itself, two open pages were handled at once
+      (Cyberpunk gold, Witcher 3 platinum), and a `location.reload()` was redrawn
+      within one cycle. Pending: the same chain inside the rebuilt client.
 10. ~~**No tests.**~~ — done: the parser is now a pure unit
     (`src/feats/stplugin_parse.{hpp,cpp}`) with `tools/test_stplugin.cpp` covering
     every bug that shipped (raw-string terminator, three-argument `setManifestid`,
