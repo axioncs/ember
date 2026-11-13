@@ -337,10 +337,12 @@ another app`.
 7. **AARCH64.** Patterns exist for it, never built or run.
 8. ~~**`CUtlVector::resize`**~~ — fixed (see above).
 9. **Docs.** README exists now; the handoff is still the deep reference.
-10. **UI / ProtonDB badge.** Dropped. Millennium is a Steam-patching framework
-    (it installs a `libXtst` proxy into `steamrt64`) and pulling it in for one
-    badge contradicts the "minimal" goal. If a badge is ever wanted, the options
-    are a CEF/CDP sidecar (what the old stack did — heavy) or nothing.
+10. **UI layer (badges, themes, settings panels).** Open, and owned by ember:
+    everything Steam renders comes from the webhelper, so the layer to build is a
+    CEF/CDP injector in this repo — enable the DevTools endpoint, attach over
+    WebSocket, inject JS into `SharedJSContext` and the store webviews, and serve
+    page calls from the CLI over `Runtime.addBinding`. No third-party framework,
+    no `libXtst` proxy in the client tree. First endpoint: `ember ui`.
 10. ~~**No tests.**~~ — done: the parser is now a pure unit
     (`src/feats/stplugin_parse.{hpp,cpp}`) with `tools/test_stplugin.cpp` covering
     every bug that shipped (raw-string terminator, three-argument `setManifestid`,

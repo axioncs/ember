@@ -1,0 +1,36 @@
+name: release
+
+# Builds and attaches the artifact the installer downloads. The container is the
+# point: debian:bookworm carries glibc 2.36, so the library loads on Arch and
+# Fedora alike. Building on a rolling image would raise that floor to whatever
+# the image shipped that week.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    container: debian:bookworm
+    steps:
+      - name: install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git g++ make pkg-config ca-certificates \
+            libdbus-1-dev libcurl4-openssl-dev libluajit-5.1-dev
+
+      - uses: actions/checkout@v4
+
+      - name: build and package
+        run: sh scripts/build-release.sh "${GITHUB_REF_NAME}"
+
+      - name: publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
