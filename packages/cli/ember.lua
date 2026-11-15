@@ -516,8 +516,12 @@ local function cmdUpdate(checkOnly)
 	end
 
 	print("")
-	local ok_run = os.execute(
-		"curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh")
+	local flags = ""
+	local chosen = readFile(dataDir() .. "/install-flags")
+	if chosen then flags = trim(chosen) end
+	local cmd = "curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh"
+	if flags ~= "" then cmd = string.format("%s -s -- %s", cmd, flags) end
+	local ok_run = os.execute(cmd)
 	return ok_run == true and 0 or 1
 end
 

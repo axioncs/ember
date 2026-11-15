@@ -51,18 +51,35 @@ launcher into the user prefix (`~/.local`). If there is no artifact for your tag
 it builds from source instead, installing the build dependencies only then;
 `--from-source` forces that.
 
+It also patches Steam so every launch starts with ember, the same way the NixOS
+module wraps the package:
+
+- `~/.local/share/applications/steam.desktop` — a copy of the packaged entry with
+  `Exec` pointed at `steam-ember`, shadowing it for the menu, the dock and
+  `steam://` links. No root, no pacman-managed file touched.
+- `~/.local/bin/steam` — a shim, so `steam` in a terminal resolves through the
+  launcher too. It only applies while `~/.local/bin` precedes `/usr/bin` in
+  `PATH`; the install says so when it does not.
+
+Both carry an `X-Ember-Alternative` marker, and existing files of the same name
+are kept beside them as `*.pre-ember` and restored by `--uninstall`.
+
 Flags go after `sh -s --`, otherwise `sh` swallows them:
 
 ```sh
-# also point the Steam desktop entry at ember
-curl -fsSL ... | sh -s -- --desktop
+# install ember but leave Steam's launchers alone
+curl -fsSL ... | sh -s -- --no-steam-patch
 
 # build here instead of downloading the release
 curl -fsSL ... | sh -s -- --from-source
 
-# remove everything the script installed
+# remove everything the script installed, and restore what it replaced
 curl -fsSL ... | sh -s -- --uninstall
 ```
+
+Flatpak Steam cannot be hooked this way — the audit library has to load into the
+client process, and the sandbox is not that process. The script skips the desktop
+entry when it finds no packaged `steam.desktop`.
 
 No clone needed — the script fetches the sources itself. Set `EMBER_SRC` if you
 want it to build a local checkout instead.
