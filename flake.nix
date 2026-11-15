@@ -5,9 +5,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
     ember-core = {
-      # git, not the github: tarball endpoint: the tarball fetches truncate on
-      # this connection often enough that a lock bump fails more often than it
-      # lands, and a truncated source is not resumable.
+      # git, not the github: tarball endpoint, whose fetches truncate here.
       url = "git+https://github.com/axioncs/ember-core?ref=ember";
       flake = false;
     };
