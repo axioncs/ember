@@ -1,3 +1,6 @@
 result
 result-*
 dist/
+
+# maintainer state doc; local only
+HANDOFF.md
