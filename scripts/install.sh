@@ -5,6 +5,7 @@
 #
 # Flags:
 #   --no-steam-patch  install ember but leave Steam's launchers alone
+#   --no-restart      do not close and relaunch Steam after installing
 #   --from-source     build the library here instead of downloading a release
 #   --uninstall       remove everything this script installed
 #
@@ -24,6 +25,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ember"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 PATCH=1
+RESTART=1
 UNINSTALL=0
 FROM_SOURCE="${EMBER_FROM_SOURCE:-0}"
 # Test hooks: the OS check and the packaged desktop entry are read from these
@@ -44,6 +46,7 @@ ember installer for Arch and Fedora.
 
 Flags:
   --no-steam-patch  install ember but leave Steam's launchers alone
+  --no-restart      do not close and relaunch Steam after installing
   --from-source     build the library here instead of downloading a release
   --uninstall       remove everything this script installed
 
@@ -59,6 +62,7 @@ for arg in "$@"; do
 	case "$arg" in
 		--desktop) PATCH=1 ;;
 		--no-steam-patch|--no-desktop) PATCH=0 ;;
+		--no-restart) RESTART=0 ;;
 		--from-source) FROM_SOURCE=1 ;;
 		--uninstall) UNINSTALL=1 ;;
 		-h|--help) usage; exit 0 ;;
@@ -354,6 +358,48 @@ else
 	say "leaving Steam alone (--no-steam-patch)"
 	# `ember update` replays this, so an update cannot turn the patch back on.
 	printf '%s\n' '--no-steam-patch' > "$DATA_DIR/install-flags"
+fi
+
+# A running client keeps the library that was loaded at its start, so a fresh
+# install only takes effect on the next launch.
+steam_running() {
+	pgrep -x steam >/dev/null 2>&1 || pgrep -x steamwebhelper >/dev/null 2>&1
+}
+
+restart_steam() {
+	if ! command -v pgrep >/dev/null 2>&1; then
+		say "cannot detect Steam (no pgrep); start it with steam-ember"
+		return 0
+	fi
+
+	if steam_running; then
+		say "closing Steam"
+		"$BIN_DIR/steam-ember" -shutdown </dev/null >/dev/null 2>&1 || true
+		waited=0
+		while steam_running && [ "$waited" -lt 20 ]; do
+			sleep 1
+			waited=$((waited + 1))
+		done
+		if steam_running; then
+			say "Steam did not exit; it picks up ember when you next start it"
+			return 0
+		fi
+	fi
+
+	# Detached, and with stdin closed: the installer is often running from a
+	# pipe, and a background child that inherits it eats the rest of the script.
+	say "starting Steam with ember"
+	if command -v setsid >/dev/null 2>&1; then
+		setsid "$BIN_DIR/steam-ember" </dev/null >/dev/null 2>&1 &
+	else
+		nohup "$BIN_DIR/steam-ember" </dev/null >/dev/null 2>&1 &
+	fi
+}
+
+if [ "$PATCH" = 1 ] && [ "$RESTART" = 1 ]; then
+	restart_steam
+elif [ "$PATCH" = 1 ]; then
+	say "start Steam again to load ember (--no-restart)"
 fi
 
 say "done"

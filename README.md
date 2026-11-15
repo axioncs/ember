@@ -64,11 +64,18 @@ module wraps the package:
 Both carry an `X-Ember-Alternative` marker, and existing files of the same name
 are kept beside them as `*.pre-ember` and restored by `--uninstall`.
 
+A running client keeps whatever library it loaded at start, so a successful
+install closes Steam (`-shutdown`, up to 20 s) and starts it again through the
+launcher. `--no-restart` skips that and leaves the restart to you.
+
 Flags go after `sh -s --`, otherwise `sh` swallows them:
 
 ```sh
 # install ember but leave Steam's launchers alone
 curl -fsSL ... | sh -s -- --no-steam-patch
+
+# install without closing a running Steam
+curl -fsSL ... | sh -s -- --no-restart
 
 # build here instead of downloading the release
 curl -fsSL ... | sh -s -- --from-source
