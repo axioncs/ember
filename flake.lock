@@ -3,11 +3,11 @@
     "ember-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1794908488,
-        "narHash": "sha256-dxjC69kYDgkZGkOrlsvnWBn/K1nZXAfIkWL/iXBXxDc=",
+        "lastModified": 1794923164,
+        "narHash": "sha256-E3p7shHipAL4Uos0mGTH4rj6ZsSa6mHttRSweDiGGSc=",
         "ref": "ember",
-        "rev": "ab6194a5a4c063657f932aa53a3609367a7aaaa6",
-        "revCount": 1234,
+        "rev": "0d1d5db351439b84dd06f91f00e2d5fc741ccd10",
+        "revCount": 1242,
         "type": "git",
         "url": "https://github.com/axioncs/ember-core"
       },
