@@ -278,6 +278,11 @@ end
 -- both as a bare name ("gdrive") and with a path ("gdrive:backups/ember"), and
 -- appending to either form cannot work for both.
 local function cloudConfig(key)
+	-- Environment wins over the file: the NixOS module sets these, and a
+	-- declarative option has to beat a value left in config.yaml.
+	local env = os.getenv("EMBER_CLOUD_" .. key:sub(6):upper())
+	if env and env ~= "" then return env end
+
 	local content = readFile(configDir() .. "/config.yaml")
 	if not content then return nil end
 	for line in content:gmatch("([^\n]+)") do
@@ -289,6 +294,28 @@ end
 
 local function cloudRemote()
 	return cloudConfig("CloudRemote") or ""
+end
+
+-- Cloud is on unless the config or the NixOS option says otherwise. Mirrors
+-- the core's own rule, so `status` and the library agree.
+local function cloudEnabled()
+	local env = os.getenv("EMBER_CLOUD")
+	if env ~= nil and env ~= "" then
+		local v = env:lower()
+		return not (v == "0" or v == "no" or v == "false")
+	end
+
+	local content = readFile(configDir() .. "/config.yaml")
+	if content then
+		for line in content:gmatch("([^\n]+)") do
+			local value = line:match("^%s*Cloud%s*:%s*(.-)%s*$")
+			if value then
+				local v = value:lower()
+				return not (v == "0" or v == "no" or v == "false")
+			end
+		end
+	end
+	return true
 end
 
 local function cloudRemoteFolder()
@@ -606,6 +633,11 @@ end
 -- ---------------------------------------------------------------------------
 
 local function cloudReady(needStore)
+	if not cloudEnabled() then
+		io.stderr:write("ember: cloud saves are off (Cloud: no)\n")
+		io.stderr:write("ember: set Cloud: yes in " .. configDir() .. "/config.yaml first\n")
+		return false
+	end
 	if trim(sh("command -v rclone 2>/dev/null")) == "" then
 		io.stderr:write("ember: rclone is not installed\n")
 		io.stderr:write("ember: install it, then: rclone config\n")
@@ -648,6 +680,11 @@ local function cmdCloudPull()
 end
 
 local function cmdCloudStatus()
+	if not cloudEnabled() then
+		print("cloud saves:   off (Cloud: no)")
+		return 0
+	end
+
 	local store = cloudRoot()
 	if not isDir(store) then
 		print("cloud store:   none yet")
@@ -721,10 +758,73 @@ local function cmdCloudStatus()
 	return 0
 end
 
+local function cmdCloudSetup()
+	if trim(sh("command -v rclone 2>/dev/null")) == "" then
+		io.stderr:write("ember: rclone is not installed\n")
+		io.stderr:write("ember: install it, then: rclone config\n")
+		return 1
+	end
+
+	local listing = trim(sh("rclone listremotes 2>/dev/null"))
+	if listing == "" then
+		print("No rclone remotes are configured yet.")
+		print("")
+		print("  1. rclone config      - add one; the login happens in your browser")
+		print("  2. ember cloud setup  - pick it here")
+		return 0
+	end
+
+	print("Configured rclone remotes:")
+	local names = {}
+	for name in listing:gmatch("([^\n]+)") do
+		table.insert(names, (name:gsub(":$", "")))
+		print(string.format("  %d) %s", #names, names[#names]))
+	end
+
+	io.write("\nSelect [skip]: ")
+	local choice = io.read("*l") or ""
+	choice = trim(choice)
+	if choice == "" then
+		print("Skipped.")
+		return 0
+	end
+	local index = tonumber(choice)
+	if not index or not names[index] then
+		io.stderr:write("ember: no such remote: " .. choice .. "\n")
+		return 1
+	end
+
+	local chosen = names[index]
+	local path = configDir() .. "/config.yaml"
+	local content = readFile(path) or ""
+
+	-- Rewrite the key rather than append: two CloudRemote lines leave the
+	-- first one winning, which reads as "the setting did nothing".
+	if content:match("^\n?CloudRemote:.*$") then
+		content = content:gsub("(^|\n)CloudRemote:.*\n?", "%1CloudRemote: " .. chosen .. "\n", 1)
+	else
+		content = content .. "\n# rclone remote ember cloud syncs saves with\nCloudRemote: " .. chosen .. "\n"
+	end
+
+	mkdirp(configDir())
+	local f = io.open(path, "w")
+	if not f then
+		io.stderr:write("ember: cannot write " .. path .. "\n")
+		return 1
+	end
+	f:write(content)
+	f:close()
+
+	print("cloud remote: " .. chosen)
+	print("upload with:  ember cloud push")
+	return 0
+end
+
 local function cmdCloud()
 	print([[
 ember cloud <command>
 
+  setup           choose which rclone remote saves sync to
   push            upload the save store to the configured rclone remote
   pull            download the remote over the local store
   status          show local and remote save counts
@@ -1142,7 +1242,8 @@ elseif command == "ui" then
 	os.exit(cmdUI(arg[2], arg[3]))
 elseif command == "cloud" then
 	local sub = arg[2]
-	if sub == "push" then os.exit(cmdCloudPush())
+	if sub == "setup" then os.exit(cmdCloudSetup())
+	elseif sub == "push" then os.exit(cmdCloudPush())
 	elseif sub == "pull" then os.exit(cmdCloudPull())
 	elseif sub == "status" then os.exit(cmdCloudStatus())
 	else os.exit(cmdCloud()) end

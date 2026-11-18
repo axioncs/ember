@@ -400,6 +400,94 @@ restart_steam() {
 	fi
 }
 
+# Offered before the restart, because Steam picks up config at start and the
+# user is already at a terminal. Reads the remote list from rclone itself, so
+# there is nothing to keep in sync here and no provider-specific code.
+#
+# The login is NOT part of this. `rclone config` does that, in the user's
+# browser, and writes the token to ~/.config/rclone/rclone.conf — ember only
+# ever reads a remote name out of config.yaml. Non-interactive installs skip
+# the whole thing.
+setup_cloud() {
+	CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/ember/config.yaml"
+
+	if [ ! -t 0 ] || [ "${NONINTERACTIVE:-0}" = 1 ]; then
+		return 0
+	fi
+	if ! command -v rclone >/dev/null 2>&1; then
+		printf '\nCloud saves: install rclone and run `rclone config` to sync saves\n'
+		printf 'between machines. Skipping for now.\n'
+		return 0
+	fi
+
+	# A remote already recorded in config.yaml is left alone; re-running the
+	# installer must not silently move the user's saves to a different drive.
+	if [ -f "$CONFIG_FILE" ] && grep -q '^CloudRemote: *[^"[:space:]]' "$CONFIG_FILE" 2>/dev/null; then
+		return 0
+	fi
+
+	printf '\nCloud saves (optional)\n'
+	printf '  ember keeps saves for added games in ~/.config/ember/cloud.\n'
+	printf '  Pick a storage to sync them to, so another machine can pick up\n'
+	printf '  where you left off. Your games and Steam stay untouched.\n\n'
+
+	remotes=$(rclone listremotes 2>/dev/null | sed 's/:$//')
+	if [ -z "$remotes" ]; then
+		printf '  No rclone remotes are configured yet.\n'
+		printf '  Run:  rclone config\n'
+		printf '  Then: ember cloud setup\n\n'
+		return 0
+	fi
+
+	printf '  Available remotes:\n'
+	printf '    0) skip - saves stay on this machine\n'
+	n=1
+	IFS='
+'
+	for r in $remotes; do
+		printf '    %d) %s\n' "$n" "$r"
+		n=$((n + 1))
+	done
+	unset IFS
+	printf '\n  Select [0]: '
+
+	choice=""
+	read -r choice || choice="0"
+	[ -n "$choice" ] || choice="0"
+
+	case "$choice" in
+		0) printf '  Skipped. Set it later with `ember cloud setup`.\n\n'; return 0 ;;
+		''|*[!0-9]*) printf '  Not a number; skipping.\n\n'; return 0 ;;
+	esac
+
+	selected=$(printf '%s\n' "$remotes" | sed -n "${choice}p")
+	if [ -z "$selected" ]; then
+		printf '  No such remote; skipping.\n\n'
+		return 0
+	fi
+
+	mkdir -p "$(dirname "$CONFIG_FILE")"
+	if [ -f "$CONFIG_FILE" ]; then
+		cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
+	fi
+	# Rewrite the key rather than append: a re-run must replace a stale value,
+	# and appending would leave two CloudRemote lines where the first wins.
+	if grep -q '^CloudRemote:' "$CONFIG_FILE" 2>/dev/null; then
+		tmp="${CONFIG_FILE}.tmp"
+		sed "s|^CloudRemote:.*|CloudRemote: $selected|" "$CONFIG_FILE" > "$tmp" \
+			&& mv "$tmp" "$CONFIG_FILE"
+	else
+		printf '\n# rclone remote ember cloud syncs saves with\nCloudRemote: %s\n' \
+			"$selected" >> "$CONFIG_FILE"
+	fi
+	printf '  Cloud saves will sync to %s\n' "$selected"
+	printf '  Upload with: ember cloud push\n\n'
+}
+
+if [ "$UNINSTALL" = 0 ]; then
+	setup_cloud
+fi
+
 if [ "$PATCH" = 1 ] && [ "$RESTART" = 1 ]; then
 	restart_steam
 elif [ "$PATCH" = 1 ]; then

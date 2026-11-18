@@ -1,30 +1,11 @@
 # ember
 
-Steam library tooling for Linux. It lets Steam install and play games your account
-does not own, driven by plain script files you drop in a folder.
+Play and install Steam games your account doesn't own, with cloud saves that
+follow you between machines.
 
-Works on the current 64-bit Steam client, needs no background service, and does
-not modify any file inside your Steam installation.
-
-## What it does
-
-- **Unlocks** the games listed in stplug-in scripts.
-- **Builds the install plan** Steam refuses to build for apps you don't own, so
-  the install dialog shows the real size and the download actually starts.
-- **Stages manifests** from a local store, because Valve denies manifest requests
-  for unowned depots.
-- **Filters by your setup**: only your platform, only languages the game ships,
-  only the language your client uses.
-- **Gives you a CLI** for importing, removing, inspecting and diagnosing.
-- **Keeps your saves.** Saves for added games are stored locally and can be
-  synced to your own cloud storage, so a second machine picks up where you
-  left off.
-
-## Requirements
-
-- Linux, x86_64, with Steam installed and logged in.
-- Either NixOS, or Arch / Fedora / a derivative of them.
-- `rclone` is optional and only needed for `ember cloud`.
+ember attaches to Steam at launch and answers its questions about those games.
+Nothing inside your Steam installation is modified, and there is no background
+service.
 
 ## Install
 
@@ -34,171 +15,37 @@ not modify any file inside your Steam installation.
 {
   inputs.ember.url = "github:axioncs/ember";
 
-  # add ember.nixosModules.default to your modules list, then:
+  # add ember.nixosModules.default to your modules, then:
   programs.ember.enable = true;
 }
 ```
 
-Rebuild. Steam behaves exactly as before, now with ember attached. Setting
-`programs.ember.enable = false` and rebuilding returns you to stock Steam.
+Rebuild, and Steam starts with ember. `programs.ember.enable = false` and a
+rebuild puts everything back.
 
-### Arch and Fedora
+### Arch, Fedora and derivatives
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
 ```
 
-The script downloads the release artifact for the latest tag — built in a
-`debian:bookworm` container, so the library needs nothing newer than glibc 2.36 —
-verifies its published SHA-256, and installs the `ember` CLI and a `steam-ember`
-launcher into the user prefix (`~/.local`). If there is no artifact for your tag
-it builds from source instead, installing the build dependencies only then;
-`--from-source` forces that.
+That installs the CLI and makes Steam start with ember. It asks about syncing
+saves at the end — see [Saves](#saves).
 
-It also patches Steam so every launch starts with ember, the same way the NixOS
-module wraps the package:
+## Adding a game
 
-- `~/.local/share/applications/steam.desktop` — a copy of the packaged entry with
-  `Exec` pointed at `steam-ember`, shadowing it for the menu, the dock and
-  `steam://` links. No root, no pacman-managed file touched.
-- `~/.local/bin/steam` — a shim, so `steam` in a terminal resolves through the
-  launcher too. It only applies while `~/.local/bin` precedes `/usr/bin` in
-  `PATH`; the install says so when it does not.
-
-Both carry an `X-Ember-Alternative` marker, and existing files of the same name
-are kept beside them as `*.pre-ember` and restored by `--uninstall`.
-
-A running client keeps whatever library it loaded at start, so a successful
-install closes Steam (`-shutdown`, up to 20 s) and starts it again through the
-launcher. `--no-restart` skips that and leaves the restart to you.
-
-Flags go after `sh -s --`, otherwise `sh` swallows them:
+Two things: a script that tells ember which game this is, and the game's
+manifest files. Both usually arrive together as a zip.
 
 ```sh
-# install ember but leave Steam's launchers alone
-curl -fsSL ... | sh -s -- --no-steam-patch
-
-# install without closing a running Steam
-curl -fsSL ... | sh -s -- --no-restart
-
-# build here instead of downloading the release
-curl -fsSL ... | sh -s -- --from-source
-
-# remove everything the script installed, and restore what it replaced
-curl -fsSL ... | sh -s -- --uninstall
+ember import ~/Downloads/1091500.zip   # script + manifests
+ember import ~/Downloads/1245620.lua   # script only
 ```
 
-Flatpak Steam cannot be hooked this way — the audit library has to load into the
-client process, and the sandbox is not that process. The script skips the desktop
-entry when it finds no packaged `steam.desktop`.
+Then install the game in Steam as usual. No restart needed.
 
-No clone needed — the script fetches the sources itself. Set `EMBER_SRC` if you
-want it to build a local checkout instead.
-
-On NixOS the script refuses to run and tells you to use the module instead.
-
-### Remove
-
-- NixOS: set `programs.ember.enable = false` and rebuild.
-- Script install: `./scripts/install.sh --uninstall`.
-
-## Use
-
-Import a script or an archive; Steam picks it up without a restart.
-
-```sh
-ember import ~/Downloads/1091500.zip     # an archive with manifests
-ember import ~/Downloads/1245620.lua     # a bare script
-```
-
-Then install the game in Steam as usual.
-
-### Store-page layer
-
-Badges, themes and settings panels are drawn by `steamwebhelper`, not by the
-client, so ember needs a DevTools (CDP) connection to that process. Steam never
-opens that endpoint on its own, so ember ships a small preload shim that adds
-`--remote-debugging-port` when the client spawns the webhelper — and nothing else.
-
-It is on by default. The shim starts the badge agent the first time the client
-spawns a webhelper, so opening any store app page draws the ProtonDB pill within
-a couple of seconds, and a navigation redraws it. No unit, no daemon, nothing to
-remember.
-
-```nix
-programs.ember.cefDebug = false;   # NixOS, to leave the webhelper untouched
-programs.ember.cefPort = 9090;     # optional, default 8080
-```
-
-```sh
-EMBER_CEF=0 steam-ember            # script installs: same switch on the launcher
-```
-
-`ember ui status` reports the endpoint when it is not working, and
-`ember ui attach` draws once by hand. The port is unauthenticated, so any local
-process can drive the webview while it is open — that is the cost of the layer,
-and the reason `cefDebug = false` exists.
-
-| Command | What it does |
-|---|---|
-| `ember import <file.lua\|file.zip>` | Add a game: script, depot keys, manifest pins, manifests |
-| `ember remove <appid>` | Drop an imported game and the manifests only it uses |
-| `ember list` | Show what is imported and how many manifests are stored |
-| `ember status` | Client, store and depotcache state |
-| `ember ui [status]` | Store-page injection endpoint: port, targets, what is missing |
-| `ember ui attach [appid]` | Draw the ProtonDB pill on the open store page |
-| `ember ui watch [seconds]` | Keep drawing it as pages change (default 3s) |
-| `ember cloud push` | Upload saves for added games to your own storage |
-| `ember cloud pull` | Download them, onto this machine or a new one |
-| `ember cloud status` | Local and remote save counts |
-| `ember doctor` | Full check; the first thing to run when something is wrong |
-| `ember update [--check]` | Update the library and CLI to the latest release |
-
-### Saving your progress
-
-Steam refuses cloud saves for apps the account does not own, so ember keeps them
-on disk instead — in `~/.config/ember/cloud/<account>/<app>/`. Games you *do*
-own are untouched; their saves still go to Steam.
-
-That directory is yours, so anything that copies files can back it up. `ember
-cloud` wraps [rclone](https://rclone.org) for the common case, which means
-Google Drive, OneDrive, Dropbox, S3, a NAS or a plain USB drive all work with no
-extra code:
-
-```sh
-rclone config                          # once, creates the remote
-```
-
-Then name it in `~/.config/ember/config.yaml`:
-
-```yaml
-CloudRemote: gdrive                   # a bare remote name
-CloudFolder: ember                    # optional, default CloudRedirect
-```
-
-```sh
-ember cloud push                       # upload
-ember cloud pull                       # download (works onto a fresh machine)
-ember cloud status                     # what is where
-```
-
-`push` mirrors the store up, so files you delete locally are deleted remotely
-too. `pull` does the reverse. Both are last-write-wins: if two machines edited
-the same save independently, the one synced last wins. Nothing is uploaded
-unless you run the command, and ember never holds credentials — rclone owns the
-token, and ember only ever sees a remote name.
-
-### Where things live
-
-| What | Path |
-|---|---|
-| Scripts | `~/.steam/steam/config/stplug-in/*.lua` |
-| Manifest store | `~/.config/ember/manifests/` |
-| Save store | `~/.config/ember/cloud/<account>/<app>/` |
-| Config | `~/.config/ember/config.yaml` |
-| Log | `~/.ember.log` |
-
-Scripts are plain text. A minimal one:
+A minimal script is one line per depot, with its key and the manifest file that
+goes with it:
 
 ```
 addappid(1245620)
@@ -206,64 +53,126 @@ addappid(1245620,1,"<64 hex depot key>")
 setManifestid(1245620,"<manifest id>",<size in bytes>)
 ```
 
-Dropping a file into the scripts folder is enough — ember reloads on change.
+Dropping a `.lua` into `~/.steam/steam/config/stplug-in/` does the same thing;
+ember picks up changes there on its own.
 
-## Troubleshooting
+`ember list` shows what's imported, `ember remove <appid>` takes one back out.
 
-Start here:
+## Saves
+
+Steam refuses cloud saves for games your account doesn't own. ember keeps those
+saves on disk instead and can sync them to storage you choose, so a second
+machine picks up where you left off.
+
+Games you *do* own are never touched — their saves keep going to Steam.
+
+### Pick a storage
+
+The sync uses [rclone](https://rclone.org), which supports Google Drive,
+OneDrive, Dropbox, S3, WebDAV, a NAS or a plain folder. Run it once:
+
+```sh
+rclone config
+```
+
+**This is where you log in.** rclone opens your browser, you approve access, and
+it stores the token in `~/.config/rclone/rclone.conf`. ember never sees your
+password or that token — it only reads the remote's name. Nothing else ever asks
+you to log in.
+
+Then tell ember which one to use:
+
+```sh
+ember cloud setup      # lists your remotes, pick one
+```
+
+On NixOS, set it declaratively instead:
+
+```nix
+programs.ember.cloudRemote = "gdrive";
+programs.ember.cloudFolder = "ember";   # optional
+```
+
+### Use it
+
+```sh
+ember cloud push       # upload your saves
+ember cloud pull       # download them, onto this machine or a new one
+ember cloud status     # what's local, what's remote
+```
+
+`push` makes the remote match your machine, so a save you delete locally is
+deleted remotely too. `pull` does the reverse. If two machines edited the same
+save independently, whichever synced last wins.
+
+Nothing uploads on its own — you run the command.
+
+### Turn it off
+
+```nix
+programs.ember.cloud = false;    # NixOS
+```
+
+Or `Cloud: no` in `~/.config/ember/config.yaml`. Added games then get no cloud
+at all.
+
+### Changing remotes
+
+Remotes belong to rclone, so switching storage is `rclone config` to add the new
+one, then `ember cloud setup` to point at it. Your saves are plain files under
+`~/.config/ember/cloud/`, so anything that copies a folder can back them up too.
+
+## Store-page badges
+
+Store pages can show a ProtonDB badge and load community themes. Steam draws
+those pages in a separate browser process that ember talks to over a local
+debugging port.
+
+It's on by default. To leave it alone:
+
+```nix
+programs.ember.cefDebug = false;    # NixOS
+```
+
+`ember ui status` reports the connection, `ember ui attach` draws once by hand.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `ember import <file>` | Add a game from a `.lua` or `.zip` |
+| `ember remove <appid>` | Remove a game and its manifests |
+| `ember list` | Show what's imported |
+| `ember status` | Client and store state |
+| `ember cloud setup` | Choose where saves sync to |
+| `ember cloud push` | Upload saves |
+| `ember cloud pull` | Download saves |
+| `ember cloud status` | Local vs remote saves |
+| `ember doctor` | Check everything; run this first when something's wrong |
+| `ember update` | Update ember |
+| `ember ui status` | Store-page badge connection |
+
+## When something's wrong
 
 ```sh
 ember doctor
 ```
 
-It checks that the library is attached to the client, that Steam's code signatures
-still match, that your SteamID was captured, how many manifests you have against
-how many the scripts expect, and whether the crash guard tripped. It exits
-non-zero on failure.
+It checks each layer and says what's broken. Common ones:
 
-| Symptom | Meaning |
+| What you see | What it means |
 |---|---|
-| Games appear owned but the install shows 0 B | Steam built no depots for the app; run `ember doctor` |
-| Install fails with "No internet connection" | That depot's manifest is not in the store; `ember doctor` reports how many are missing |
-| Everything looks stock | The library is not attached; `ember doctor` says so under `core` |
-| Steam starts but nothing works, once | The crash guard tripped after a failed start; it clears on the next launch |
-| Broken after a Steam client update | Steam's code signatures moved. `ember doctor` names them; a new ember release is needed |
+| Games look owned but install shows 0 B | Steam built no download plan; `ember doctor` says why |
+| Install fails with "No internet connection" | The game's manifest files aren't in the store; `ember doctor` counts what's missing |
+| Steam looks completely normal | ember isn't attached — launch through `steam-ember` |
+| Nothing works for one launch | ember's crash guard tripped; it clears on the next start |
+| Broken after a Steam update | Steam's internals moved and ember needs an update |
 
-## Compatibility
+## Requirements and limits
 
-**Do not run two client hooks at once.** Remove any other Steam library mod before
-enabling ember — a standalone SLSsteam, or anything else that loads a library into
-the client. They share the `stplug-in` folder and would both try to own licensing.
-
-**ember does not modify Steam's UI yet.** Store-page badges, themes and settings
-panels are rendered by a CEF/CDP injector speaking to the webhelper's DevTools
-endpoint, not by a client hook; ember will grow that layer itself, in this repo
-(`ember ui`). Until it lands there is nothing to enable and no third-party
-framework to install.
-
-**ember owns `programs.steam.package`.** If another module sets that option too,
-Nix reports conflicting definitions. Use `programs.ember.steamPackage` rather than
-defining `programs.steam.package` yourself.
-
-**Anti-cheat.** Games using EAC or BattlEye can treat a modified client as
-tampering. Avoid ember in multiplayer titles you care about.
-
-**Flatpak Steam** is not supported by either install path; both assume a native
-Steam install.
-
-## How it works
-
-ember is a shared library that Steam loads at startup. It answers Steam's ownership
-and licence questions for the apps in your scripts, builds the install plan for
-them, supplies depot keys, stages manifests into Steam's depot cache, and serves
-cloud-save requests for added games from a local store.
-
-A small CLI (`ember`) writes the scripts and the manifest store; the library reads
-them. Nothing is patched on disk and there is no daemon. The library itself never
-touches the network — syncing saves off the machine is an explicit CLI command
-that shells out to `rclone`, so no credentials ever enter the client.
-
-## License
-
-AGPL-3.0-only. Derived from [AceSLS/SLSsteam](https://github.com/AceSLS/SLSsteam);
-the library source lives in [axioncs/ember-core](https://github.com/axioncs/ember-core).
+- Linux x86_64 with native Steam. Flatpak Steam can't be hooked this way.
+- Don't run ember alongside another Steam library mod. They fight over the same
+  files.
+- Games with EAC or BattlEye anti-cheat may treat a modified client as tampering.
+  Avoid ember in multiplayer games you care about.
+- ember is AGPL-3.0-only, derived from [SLSsteam](https://github.com/AceSLS/SLSsteam).
