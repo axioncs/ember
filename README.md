@@ -177,4 +177,4 @@ It checks each layer and says what's broken. Common ones:
   files.
 - Games with EAC or BattlEye anti-cheat may treat a modified client as tampering.
   Avoid ember in multiplayer games you care about.
-- ember is AGPL-3.0-only, derived from [SLSsteam](https://github.com/AceSLS/SLSsteam).
+- ember is AGPL-3.0-only.

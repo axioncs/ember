@@ -221,8 +221,10 @@ from_source() {
 	fi
 
 	say "building"
-	make -C "$work/src" -j"$(nproc)" audit-libs
-	install -m755 "$work/src/bin/SLSsteam.so" "$stage/ember-core.so"
+	make -C "$work/src" -j"$(nproc)" bin/ember-core.so bin/ember-library-inject.so
+	install -m755 "$work/src/bin/ember-core.so" "$stage/ember-core.so"
+	install -m755 "$work/src/bin/ember-library-inject.so" \
+		"$stage/ember-library-inject.so"
 
 	# The CLI is one file; fetching it avoids cloning a second repository. Take
 	# it from the same tag as the version being recorded, so a release install
@@ -246,10 +248,12 @@ fi
 say "installing to $DATA_DIR"
 mkdir -p "$DATA_DIR" "$BIN_DIR"
 install -m755 "$stage/ember-core.so" "$DATA_DIR/ember-core.so"
+[ -f "$stage/ember-library-inject.so" ] &&
+	install -m755 "$stage/ember-library-inject.so" \
+		"$DATA_DIR/ember-library-inject.so"
 install -m644 "$stage/ember.lua" "$DATA_DIR/ember.lua"
 install -m644 "$stage/VERSION" "$DATA_DIR/VERSION"
 
-# Optional: the preload shim that opens the webhelper's DevTools endpoint.
 [ -f "$stage/ember-cef.so" ] && install -m755 "$stage/ember-cef.so" "$DATA_DIR/ember-cef.so"
 [ -f "$stage/ember-cdpd" ] && install -m755 "$stage/ember-cdpd" "$DATA_DIR/ember-cdpd"
 [ -f "$stage/badge.js" ] && install -m644 "$stage/badge.js" "$DATA_DIR/badge.js"
@@ -274,7 +278,7 @@ for dir in \$PATH; do
 	[ -x "\$dir/steam" ] || continue
 	resolved="\$(readlink -f "\$dir/steam" 2>/dev/null || true)"
 	[ -n "\$resolved" ] || continue
-	[ "\$resolved" = "\$self" ] && continue
+	[ "$resolved" = "$self" ] && continue
 	[ -n "\$shim" ] && [ "\$resolved" = "\$shim" ] && continue
 	real="\$dir/steam"
 	break
@@ -282,18 +286,15 @@ done
 IFS=\$old_ifs
 [ -n "\$real" ] || { printf 'steam-ember: no steam binary on PATH\n' >&2; exit 127; }
 
-# The badge agent is started here and again by the shim (EMBER_AGENT): the first
-# covers a launch through this script, the second covers anything that runs the
-# client directly. The agent's lock makes the duplicate a no-op.
-if [ "\${EMBER_CEF:-1}" != 0 ] && [ -f "$DATA_DIR/ember-cef.so" ]; then
-	"$BIN_DIR/ember" ui watch --quiet >/dev/null 2>&1 &
-	exec env LD_AUDIT="$DATA_DIR/ember-core.so" \\
-		LD_PRELOAD="$DATA_DIR/ember-cef.so" \\
-		EMBER_CEF_PORT="\${EMBER_CEF_PORT:-8080}" \\
-		EMBER_AGENT="$BIN_DIR/ember" \\
-		"\$real" "\$@"
+# Both objects go in LD_AUDIT, colon-separated and in this order: the libcurl
+# redirector first, then the audit library. The core binds the client's exec
+# calls itself to rewrite the webhelper's remote-debugging argument, so nothing
+# needs LD_PRELOAD and the port is not ours to pick.
+AUDIT="$DATA_DIR/ember-library-inject.so:$DATA_DIR/ember-core.so"
+if [ "\${EMBER_CEF:-1}" != 0 ]; then
+	exec env LD_AUDIT="\$AUDIT" "\$real" "\$@"
 fi
-exec env LD_AUDIT="$DATA_DIR/ember-core.so" "\$real" "\$@"
+exec env -u LD_AUDIT "\$real" "\$@"
 EOF
 chmod 755 "$BIN_DIR/steam-ember"
 

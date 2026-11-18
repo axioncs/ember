@@ -33,19 +33,17 @@ else
 	printf 'building ember-core (%s)\n' "${EMBER_CORE_REF:-ember}"
 	git clone --depth 1 --branch "${EMBER_CORE_REF:-ember}" \
 		"${EMBER_CORE_REPO:-https://github.com/axioncs/ember-core}" "$work/src"
-	make -C "$work/src" -j"$(nproc)" audit-libs
-	install -m755 "$work/src/bin/SLSsteam.so" "$stage/ember-core.so"
+	make -C "$work/src" -j"$(nproc)" bin/ember-core.so bin/ember-library-inject.so
+	install -m755 "$work/src/bin/ember-core.so" "$stage/ember-core.so"
+	install -m755 "$work/src/bin/ember-library-inject.so" \
+		"$stage/ember-library-inject.so"
 fi
 
 install -m644 "$root/packages/cli/ember.lua" "$stage/ember.lua"
 printf '%s\n' "$tag" > "$stage/VERSION"
 
-# The preload shim ships with the artifact so the script install never needs a
-# compiler: it interposes exec* for the webhelper only.
-${CC:-cc} -std=gnu11 -O2 -Wall -Wextra -shared -fPIC -o "$stage/ember-cef.so" \
-	"$root/packages/cefshim/ember-cef.c" -ldl
-
-# The DevTools client and the badge script the UI layer needs at runtime.
+# The DevTools client and the badge script the UI layer needs at runtime. The
+# core rewrites the webhelper's own exec arguments, so no preload shim ships.
 ${CC:-cc} -std=gnu11 -O2 -Wall -Wextra -o "$stage/ember-cdpd" "$root/packages/cdp/ember-cdpd.c"
 install -m644 "$root/packages/cdp/badge.js" "$stage/badge.js"
 
