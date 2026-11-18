@@ -4,6 +4,7 @@
   lua5_4,
   unzip,
   curl,
+  rclone,
   coreutils,
   procps,
   cdp,
@@ -11,7 +12,7 @@
 }:
 stdenv.mkDerivation {
   pname = "ember-cli";
-  version = "0.5.0";
+  version = "0.5.1";
 
   src = ./.;
 
@@ -29,7 +30,7 @@ stdenv.mkDerivation {
     install -m644 ${cdp}/share/ember/badge.js $out/share/ember/badge.js
     makeWrapper ${lua5_4}/bin/lua $out/bin/ember \
       --add-flags "$out/share/ember/ember.lua" \
-      --prefix PATH : ${lib.makeBinPath [ unzip curl coreutils procps ]}
+      --prefix PATH : ${lib.makeBinPath [ unzip curl rclone coreutils procps ]}
     runHook postInstall
   '';
 

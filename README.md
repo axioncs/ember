@@ -16,11 +16,15 @@ not modify any file inside your Steam installation.
 - **Filters by your setup**: only your platform, only languages the game ships,
   only the language your client uses.
 - **Gives you a CLI** for importing, removing, inspecting and diagnosing.
+- **Keeps your saves.** Saves for added games are stored locally and can be
+  synced to your own cloud storage, so a second machine picks up where you
+  left off.
 
 ## Requirements
 
 - Linux, x86_64, with Steam installed and logged in.
 - Either NixOS, or Arch / Fedora / a derivative of them.
+- `rclone` is optional and only needed for `ember cloud`.
 
 ## Install
 
@@ -144,8 +148,45 @@ and the reason `cefDebug = false` exists.
 | `ember ui [status]` | Store-page injection endpoint: port, targets, what is missing |
 | `ember ui attach [appid]` | Draw the ProtonDB pill on the open store page |
 | `ember ui watch [seconds]` | Keep drawing it as pages change (default 3s) |
+| `ember cloud push` | Upload saves for added games to your own storage |
+| `ember cloud pull` | Download them, onto this machine or a new one |
+| `ember cloud status` | Local and remote save counts |
 | `ember doctor` | Full check; the first thing to run when something is wrong |
 | `ember update [--check]` | Update the library and CLI to the latest release |
+
+### Saving your progress
+
+Steam refuses cloud saves for apps the account does not own, so ember keeps them
+on disk instead — in `~/.config/ember/cloud/<account>/<app>/`. Games you *do*
+own are untouched; their saves still go to Steam.
+
+That directory is yours, so anything that copies files can back it up. `ember
+cloud` wraps [rclone](https://rclone.org) for the common case, which means
+Google Drive, OneDrive, Dropbox, S3, a NAS or a plain USB drive all work with no
+extra code:
+
+```sh
+rclone config                          # once, creates the remote
+```
+
+Then name it in `~/.config/ember/config.yaml`:
+
+```yaml
+CloudRemote: gdrive                   # a bare remote name
+CloudFolder: ember                    # optional, default CloudRedirect
+```
+
+```sh
+ember cloud push                       # upload
+ember cloud pull                       # download (works onto a fresh machine)
+ember cloud status                     # what is where
+```
+
+`push` mirrors the store up, so files you delete locally are deleted remotely
+too. `pull` does the reverse. Both are last-write-wins: if two machines edited
+the same save independently, the one synced last wins. Nothing is uploaded
+unless you run the command, and ember never holds credentials — rclone owns the
+token, and ember only ever sees a remote name.
 
 ### Where things live
 
@@ -153,6 +194,7 @@ and the reason `cefDebug = false` exists.
 |---|---|
 | Scripts | `~/.steam/steam/config/stplug-in/*.lua` |
 | Manifest store | `~/.config/ember/manifests/` |
+| Save store | `~/.config/ember/cloud/<account>/<app>/` |
 | Config | `~/.config/ember/config.yaml` |
 | Log | `~/.ember.log` |
 
@@ -213,10 +255,13 @@ Steam install.
 
 ember is a shared library that Steam loads at startup. It answers Steam's ownership
 and licence questions for the apps in your scripts, builds the install plan for
-them, supplies depot keys, and stages manifests into Steam's depot cache.
+them, supplies depot keys, stages manifests into Steam's depot cache, and serves
+cloud-save requests for added games from a local store.
 
 A small CLI (`ember`) writes the scripts and the manifest store; the library reads
-them. Nothing is patched on disk and there is no daemon.
+them. Nothing is patched on disk and there is no daemon. The library itself never
+touches the network — syncing saves off the machine is an explicit CLI command
+that shells out to `rclone`, so no credentials ever enter the client.
 
 ## License
 

@@ -156,6 +156,10 @@ command -v lua >/dev/null 2>&1 || die "lua is required for the ember command"
 command -v unzip >/dev/null 2>&1 || die "unzip is required by 'ember import'"
 command -v curl >/dev/null 2>&1 || die "curl is required to download ember"
 
+# `ember cloud` shells out to rclone. It stays optional — a missing rclone only
+# breaks the cloud command, and `ember doctor` reports it.
+command -v rclone >/dev/null 2>&1 || say "rclone is not installed; 'ember cloud' will not work"
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 stage="$work/stage"

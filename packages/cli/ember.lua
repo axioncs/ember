@@ -269,6 +269,48 @@ local function cmdStatus()
 	return 0
 end
 
+-- The rclone remote (e.g. "gdrive", "onedrive") the user configured, and the
+-- folder inside it. Both are read here rather than shelled out: the CLI must
+-- work with only lua and rclone on PATH, and these are the only keys it needs.
+--
+-- The folder defaults to CloudRedirect to match the path the old provider
+-- layout used, but it is a separate key because rclone remotes are written
+-- both as a bare name ("gdrive") and with a path ("gdrive:backups/ember"), and
+-- appending to either form cannot work for both.
+local function cloudConfig(key)
+	local content = readFile(configDir() .. "/config.yaml")
+	if not content then return nil end
+	for line in content:gmatch("([^\n]+)") do
+		local value = line:match("^%s*" .. key .. "%s*:%s*(.-)%s*$")
+		if value and value ~= "" then return value end
+	end
+	return nil
+end
+
+local function cloudRemote()
+	return cloudConfig("CloudRemote") or ""
+end
+
+local function cloudRemoteFolder()
+	return cloudConfig("CloudFolder") or "CloudRedirect"
+end
+
+local function cloudRoot()
+	return configDir() .. "/cloud"
+end
+
+-- A bare remote name is "name:"; a remote that already carries a path is used
+-- as written. Either way the trailing slash makes rclone copy contents, not
+-- the directory itself.
+local function cloudRemotePath()
+	local remote = cloudRemote()
+	if remote == "" then return "" end
+	-- A bare name ("gdrive") takes the folder at its root; a remote written
+	-- with a path ("gdrive:backups") gets the folder appended below it.
+	local prefix = remote:match(":") and (remote .. "/") or (remote .. ":")
+	return prefix .. cloudRemoteFolder()
+end
+
 local function cmdDoctor()
 	local fails, warns = 0, 0
 	local function line(label, value, state)
@@ -365,6 +407,22 @@ local function cmdDoctor()
 	local cached = listFiles(depotCacheDir(), ".manifest")
 	line("manifest store", string.format("%d file(s)", #stored), #stored > 0 and "ok" or "info")
 	line("depotcache", string.format("%d manifest(s), staged on demand", #cached), "info")
+
+	-- Cloud saves for added games are served from the local store by the core;
+	-- moving them off the machine is the CLI's job, and it needs rclone.
+	if isDir(configDir() .. "/cloud") then
+		local hasRclone = trim(sh("command -v rclone 2>/dev/null")) ~= ""
+		local remote = cloudRemote()
+		if not hasRclone then
+			line("cloud", "rclone not installed - saves stay local", "warn")
+		elseif remote == "" then
+			line("cloud", "no CloudRemote set - saves stay local", "warn")
+		else
+			line("cloud", string.format("%s (%s)", remote, cloudRemotePath() .. "/"), "ok")
+		end
+	else
+		line("cloud", "no store yet", "info")
+	end
 
 	-- Every pin has to have its manifest in the store, or the install fails with
 	-- "No connection" when Steam asks the server for a manifest request code.
@@ -523,6 +581,158 @@ local function cmdUpdate(checkOnly)
 	if flags ~= "" then cmd = string.format("%s -s -- %s", cmd, flags) end
 	local ok_run = os.execute(cmd)
 	return ok_run == true and 0 or 1
+end
+
+local function humanSize(n)
+	local units = { "B", "KiB", "MiB", "GiB", "TiB" }
+	local value, unit = tonumber(n) or 0, 1
+	while value >= 1024 and unit < #units do
+		value = value / 1024
+		unit = unit + 1
+	end
+	if unit == 1 then return string.format("%d %s", value, units[unit]) end
+	return string.format("%.1f %s", value, units[unit])
+end
+
+-- ---------------------------------------------------------------------------
+-- Cloud saves: rclone-backed sync of the added-app save store
+--
+-- The core serves Cloud.* RPCs from <config>/cloud for apps the account does
+-- not own, so saves accumulate as plain files there. Nothing in this file
+-- touches the network: every command is one rclone invocation, which keeps
+-- OAuth, token refresh, retry and every provider rclone supports out of the
+-- client and out of ember. The layout on the remote mirrors the local one,
+-- <account>/<app>/…, so the remote stays readable without ember.
+-- ---------------------------------------------------------------------------
+
+local function cloudReady(needStore)
+	if trim(sh("command -v rclone 2>/dev/null")) == "" then
+		io.stderr:write("ember: rclone is not installed\n")
+		io.stderr:write("ember: install it, then: rclone config\n")
+		return false
+	end
+	if cloudRemote() == "" then
+		io.stderr:write("ember: no CloudRemote in " .. configDir() .. "/config.yaml\n")
+		io.stderr:write("ember: add  CloudRemote: <name>  naming a remote from 'rclone listremotes'\n")
+		return false
+	end
+	-- A pull creates the store; only a push needs one to exist already.
+	if needStore and not isDir(cloudRoot()) then
+		io.stderr:write("ember: no save store yet at " .. cloudRoot() .. "\n")
+		io.stderr:write("ember: launch an added game once, then sync\n")
+		return false
+	end
+	return true
+end
+
+local function cmdCloudPush()
+	if not cloudReady(true) then return 1 end
+	local src, dst = cloudRoot() .. "/", cloudRemotePath() .. "/"
+	print("pushing " .. src .. " -> " .. dst)
+	local pipe = io.popen("rclone sync --stats-one-line '" .. src .. "' '" .. dst .. "' 2>&1")
+	local out = pipe:read("a")
+	local code = pipe:close()
+	print(trim(out or ""))
+	return code and 0 or 1
+end
+
+local function cmdCloudPull()
+	if not cloudReady(false) then return 1 end
+	local src, dst = cloudRemotePath() .. "/", cloudRoot() .. "/"
+	print("pulling " .. src .. " -> " .. dst)
+	local pipe = io.popen("rclone sync --stats-one-line '" .. src .. "' '" .. dst .. "' 2>&1")
+	local out = pipe:read("a")
+	local code = pipe:close()
+	print(trim(out or ""))
+	return code and 0 or 1
+end
+
+local function cmdCloudStatus()
+	local store = cloudRoot()
+	if not isDir(store) then
+		print("cloud store:   none yet")
+		local remote = cloudRemote()
+		if remote ~= "" then
+			print(string.format("  remote:      %s (%s)", remote, cloudRemotePath() .. "/"))
+		else
+			print("  remote:      not configured (CloudRemote)")
+		end
+		return 0
+	end
+
+	-- Walked in Lua: the CLI may have only lua and rclone on PATH, and a
+	-- `find` that is not there silently reports zero blobs.
+	local apps, blobs, bytes = 0, 0, 0
+	for account in sh("ls -1 '" .. store .. "' 2>/dev/null"):gmatch("([^\n]+)") do
+		local accountPath = store .. "/" .. account
+		if isDir(accountPath) then
+			for app in sh("ls -1 '" .. accountPath .. "' 2>/dev/null"):gmatch("([^\n]+)") do
+				local appPath = accountPath .. "/" .. app
+				if isDir(appPath) then
+					apps = apps + 1
+					local manifest = readFile(appPath .. "/manifest")
+					if manifest then bytes = bytes + #manifest end
+					local cn = readFile(appPath .. "/cn")
+					if cn then bytes = bytes + #cn end
+					blobs = blobs + 2
+					for blob in sh("ls -1 '" .. appPath .. "/blobs' 2>/dev/null"):gmatch("([^\n]+)") do
+						local path = appPath .. "/blobs/" .. blob
+						local f = io.open(path, "rb")
+						if f then
+							bytes = bytes + (f:seek("end") or 0)
+							f:close()
+							blobs = blobs + 1
+						end
+					end
+				end
+			end
+		end
+	end
+
+	print(string.format("cloud store:   %s", store))
+	print(string.format("  apps:        %d", apps))
+	print(string.format("  blobs:       %d (%s)", blobs, humanSize(bytes)))
+
+	local remote = cloudRemote()
+	if remote == "" then
+		print("  remote:      not configured (CloudRemote)")
+		return 0
+	end
+	local dst = cloudRemotePath() .. "/"
+	-- -R: lsf is non-recursive by default, and the store is account/app/blobs.
+	local listing = trim(sh("rclone lsf -R --files-only --format sp '" .. dst .. "' 2>/dev/null"))
+	local remoteCount, remoteBytes = 0, 0
+	if listing ~= "" then
+		for line in listing:gmatch("([^\n]+)") do
+			-- `--format sp` separates the two fields with ';'.
+			local size = line:match("^([%d]+);")
+			if size then
+				remoteBytes = remoteBytes + tonumber(size)
+				remoteCount = remoteCount + 1
+			end
+		end
+	end
+	if remoteCount == 0 then
+		print(string.format("  remote:      %s (%s) empty or unreachable", remote, dst))
+	else
+		print(string.format("  remote:      %s (%s), %d blob(s)", remote, dst, remoteCount))
+		print(string.format("  compare:     %s local, %s remote", humanSize(bytes), humanSize(remoteBytes)))
+	end
+	return 0
+end
+
+local function cmdCloud()
+	print([[
+ember cloud <command>
+
+  push            upload the save store to the configured rclone remote
+  pull            download the remote over the local store
+  status          show local and remote save counts
+
+Configure: rclone config, then add CloudRemote: <name> to
+~/.config/ember/config.yaml
+]])
+	return 0
 end
 
 -- ---------------------------------------------------------------------------
@@ -904,6 +1114,7 @@ ember — Steam library tooling
   ember list                         show imported scripts and stored manifests
   ember status                       show client, store and depotcache state
   ember ui [status]                  show the store-page injection endpoint
+  ember cloud <push|pull|status>     sync saves to your own storage (rclone)
   ember doctor                       check the whole stack and say what is wrong
   ember update [--check]             update to the latest release
 ]])
@@ -929,6 +1140,12 @@ elseif command == "update" then
 	os.exit(cmdUpdate(arg[2] == "--check"))
 elseif command == "ui" then
 	os.exit(cmdUI(arg[2], arg[3]))
+elseif command == "cloud" then
+	local sub = arg[2]
+	if sub == "push" then os.exit(cmdCloudPush())
+	elseif sub == "pull" then os.exit(cmdCloudPull())
+	elseif sub == "status" then os.exit(cmdCloudStatus())
+	else os.exit(cmdCloud()) end
 else
 	usage()
 	os.exit(command == nil and 0 or 1)
