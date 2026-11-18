@@ -128,6 +128,11 @@ in
         # calls into the client, and the core binds exec* through la_symbind64
         # to rewrite the webhelper's --remote-debugging-port argument.
         LD_AUDIT = "${cfg.package}/lib/ember/ember-library-inject.so:${cfg.package}/lib/ember/ember-core.so";
+        # The core shells out to unzip, gzip and timeout to unpack manifest
+        # archives. Inside the FHS container the only directories on PATH are
+        # the container's own, so the user's tools are invisible even when
+        # installed. Prepending them is what makes manifest import work.
+        PATH = "${lib.makeBinPath (with pkgs; [ unzip gzip coreutils ])}:${prev.extraEnv.PATH or ""}";
         # Cloud is read by the library from the environment as well as from
         # config.yaml, so the option wins without rewriting a file the user
         # owns. The CLI reads the same variables, keeping one source of truth.
