@@ -90,7 +90,7 @@ On NixOS, set it declaratively instead:
 
 ```nix
 programs.ember.cloudRemote = "gdrive";
-programs.ember.cloudFolder = "ember";   # optional
+programs.ember.cloudFolder = "ember-cloud";   # optional, this is the default
 ```
 
 ### Use it
@@ -105,7 +105,9 @@ ember cloud status     # what's local, what's remote
 deleted remotely too. `pull` does the reverse. If two machines edited the same
 save independently, whichever synced last wins.
 
-Nothing uploads on its own — you run the command.
+Nothing uploads on its own — you run the command. If the target folder already
+holds saves for a different Steam account, `push` refuses rather than deleting
+them, because `sync` cannot tell those apart from stale copies of yours.
 
 ### Turn it off
 

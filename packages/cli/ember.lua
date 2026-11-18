@@ -273,10 +273,12 @@ end
 -- folder inside it. Both are read here rather than shelled out: the CLI must
 -- work with only lua and rclone on PATH, and these are the only keys it needs.
 --
--- The folder defaults to CloudRedirect to match the path the old provider
--- layout used, but it is a separate key because rclone remotes are written
--- both as a bare name ("gdrive") and with a path ("gdrive:backups/ember"), and
--- appending to either form cannot work for both.
+-- The folder inside it. Namespaced to ember on purpose: another save-sync tool
+-- uses a different folder name, and its files look nothing like ember's, so
+-- sharing one would make each tool treat the other's data as stale and delete
+-- it. It is a separate key because rclone remotes are written both as a bare
+-- name ("gdrive") and with a path ("gdrive:backups/ember"), and appending to
+-- either form cannot work for both.
 local function cloudConfig(key)
 	-- Environment wins over the file: the NixOS module sets these, and a
 	-- declarative option has to beat a value left in config.yaml.
@@ -319,7 +321,7 @@ local function cloudEnabled()
 end
 
 local function cloudRemoteFolder()
-	return cloudConfig("CloudFolder") or "CloudRedirect"
+	return cloudConfig("CloudFolder") or "ember-cloud"
 end
 
 local function cloudRoot()
@@ -657,9 +659,53 @@ local function cloudReady(needStore)
 	return true
 end
 
+-- Account ids of the saves in a directory tree. Both layouts are recognised:
+-- ember's <account>/<app>/ and the per-account folders another save-sync tool
+-- leaves behind, so a collision is caught either way.
+local function cloudAccountsAt(path)
+	local found = {}
+	local listing = trim(sh("rclone lsf --dirs-only '" .. path .. "' 2>/dev/null"))
+	for name in listing:gmatch("([^\n]+)") do
+		local id = (name:gsub("/$", ""))
+		if id:match("^%d+$") then table.insert(found, id) end
+	end
+	table.sort(found)
+	return found
+end
+
 local function cmdCloudPush()
 	if not cloudReady(true) then return 1 end
 	local src, dst = cloudRoot() .. "/", cloudRemotePath() .. "/"
+
+	-- sync makes the remote match the local store, so anything already there
+	-- that ember did not put there is deleted. Refuse when the remote belongs to
+	-- a different account: that is either someone else's saves or another
+	-- tool's, and neither is recoverable.
+	local remote = cloudAccountsAt(dst)
+	if #remote > 0 then
+		local localIds = {}
+		for account in sh("ls -1 '" .. cloudRoot() .. "' 2>/dev/null"):gmatch("([^\n]+)") do
+			if account:match("^%d+$") then table.insert(localIds, account) end
+		end
+		local mine = {}
+		for _, id in ipairs(localIds) do mine[id] = true end
+
+		local foreign = {}
+		for _, id in ipairs(remote) do
+			if not mine[id] then table.insert(foreign, id) end
+		end
+
+		if #foreign > 0 then
+			io.stderr:write("ember: " .. dst .. " holds saves for another account: " ..
+				table.concat(foreign, ", ") .. "\n")
+			io.stderr:write("ember: pushing would delete them, because sync makes the remote\n")
+			io.stderr:write("ember: match this machine. Move them aside first:\n")
+			io.stderr:write("ember:   rclone move " .. dst .. " " .. dst .. "old\n")
+			io.stderr:write("ember: or set CloudFolder to an empty folder of its own.\n")
+			return 1
+		end
+	end
+
 	print("pushing " .. src .. " -> " .. dst)
 	local pipe = io.popen("rclone sync --stats-one-line '" .. src .. "' '" .. dst .. "' 2>&1")
 	local out = pipe:read("a")
@@ -754,6 +800,26 @@ local function cmdCloudStatus()
 	else
 		print(string.format("  remote:      %s (%s), %d blob(s)", remote, dst, remoteCount))
 		print(string.format("  compare:     %s local, %s remote", humanSize(bytes), humanSize(remoteBytes)))
+
+		-- A count gap this large is almost never "this machine is behind": it
+		-- means the folder holds saves for another account, or another tool's
+		-- data. Say so here, because push would delete it.
+		-- Any account folder up here that this machine does not have is data
+		-- ember did not write, and sync would delete it. Check unconditionally:
+		-- a count gap is a hint, the account id is the proof.
+		local foreign = {}
+		for _, id in ipairs(cloudAccountsAt(dst)) do
+			local mine = false
+			for account in sh("ls -1 '" .. cloudRoot() .. "' 2>/dev/null"):gmatch("([^\n]+)") do
+				if account == id then mine = true end
+			end
+			if not mine then table.insert(foreign, id) end
+		end
+		if #foreign > 0 then
+			print(string.format("  WARNING:     holds saves for another account (%s)",
+				table.concat(foreign, ", ")))
+			print("               push would delete them. Move them aside first.")
+		end
 	end
 	return 0
 end

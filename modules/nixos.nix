@@ -84,11 +84,13 @@ in
 
     cloudFolder = lib.mkOption {
       type = lib.types.str;
-      default = "CloudRedirect";
+      default = "ember-cloud";
       description = ''
-        Folder inside the remote that saves are synced to. The layout below it
-        mirrors the local store, <filename>account/app</filename>, so the
-        remote stays readable without ember.
+        Folder inside the remote that saves are synced to, namespaced to ember so
+        a different save-sync tool's data in the same remote is never treated as
+        ember's to overwrite. The layout below it mirrors the local store,
+        <filename>account/app</filename>, so the remote stays readable without
+        ember.
       '';
     };
   };
