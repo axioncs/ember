@@ -128,11 +128,6 @@ in
         # calls into the client, and the core binds exec* through la_symbind64
         # to rewrite the webhelper's --remote-debugging-port argument.
         LD_AUDIT = "${cfg.package}/lib/ember/ember-library-inject.so:${cfg.package}/lib/ember/ember-core.so";
-        # The core shells out to unzip, gzip and timeout to unpack manifest
-        # archives. Inside the FHS container the only directories on PATH are
-        # the container's own, so the user's tools are invisible even when
-        # installed. Prepending them is what makes manifest import work.
-        PATH = "${lib.makeBinPath (with pkgs; [ unzip gzip coreutils ])}:${prev.extraEnv.PATH or ""}";
         # Cloud is read by the library from the environment as well as from
         # config.yaml, so the option wins without rewriting a file the user
         # owns. The CLI reads the same variables, keeping one source of truth.
@@ -143,6 +138,21 @@ in
       } // lib.optionalAttrs (!cfg.cefDebug) {
         EMBER_CEF = "0";
       };
+
+      # PATH is NOT set through extraEnv. That block is emitted as a bare
+      # assignment after nixpkgs' own `export PATH=...`, so an extraEnv PATH
+      # replaces the container's PATH and Steam stops being executable. This
+      # string lands after it and expands $PATH at runtime, so the container's
+      # directories survive.
+      #
+      # The core unpacks manifest archives by shelling out to unzip, gzip and
+      # timeout. Inside the FHS container the only directories on PATH are the
+      # container's own, so a tool installed in the system profile is invisible
+      # even though it exists — which is why manifest import reported unzip
+      # missing on a machine that has it.
+      extraProfile = (prev.extraProfile or "") + ''
+        export PATH="${lib.makeBinPath (with pkgs; [ unzip gzip coreutils ])}:$PATH"
+      '';
     });
   };
 }
