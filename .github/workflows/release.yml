@@ -31,7 +31,7 @@ jobs:
       - name: verify the pinned sha256 matches
         run: |
           set -eu
-          artifact="dist/${GITHUB_REF_NAME}-x86_64-linux.tar.gz"
+          artifact="dist/ember-${GITHUB_REF_NAME}-x86_64-linux.tar.gz"
           if [ -f "$artifact.sha256" ]; then
             actual="$(cut -d' ' -f1 "$artifact.sha256")"
           else
