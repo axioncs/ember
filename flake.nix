@@ -44,7 +44,7 @@
         version = "0.6.1";
         url =
           "https://github.com/axioncs/ember/releases/download/v0.6.1/ember-v0.6.1-x86_64-linux.tar.gz";
-        sha256 = "ba5181838ffd071616128ccac7cb0fc6922056120b7b5892cd6305e08cb997f7";
+        sha256 = "1cac486bb2519742ce147c217a6ffbc74be772ba289fb39f5ef080b58644ea58";
       };
     in
     {

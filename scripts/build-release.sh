@@ -47,7 +47,19 @@ printf '%s\n' "$tag" > "$stage/VERSION"
 ${CC:-cc} -std=gnu11 -O2 -Wall -Wextra -o "$stage/ember-cdpd" "$root/packages/cdp/ember-cdpd.c"
 install -m644 "$root/packages/cdp/badge.js" "$stage/badge.js"
 
-tar czf "$dist/$out" -C "$stage" .
+# Deterministic archive: mtimes, uid/gid, order and gzip header are all fixed,
+# so rebuilding the same source tree yields the same bytes. Without this the
+# sha256 of the artifact changes on every rebuild, and a tag that is re-pushed
+# to pick up a fix silently invalidates the hash a consumer pinned.
+export LC_ALL=C
+export TZ=UTC
+find "$stage" -exec touch -h -d '@0' {} +
+export GZIP=-n
+
+tar --sort=name \
+    --mtime='@0' \
+    --owner=0 --group=0 --numeric-owner \
+    -cf - -C "$stage" . | gzip -n -9 > "$dist/$out"
 (cd "$dist" && sha256sum "$out" > "$out.sha256")
 
 printf '%s\n' "$dist/$out"
