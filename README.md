@@ -23,6 +23,14 @@ service.
 Rebuild, and Steam starts with ember. `programs.ember.enable = false` and a
 rebuild puts everything back.
 
+A NixOS rebuild downloads the published core rather than compiling it, the same
+way the script install does on Arch and Fedora. Building from the flake input
+instead is one option away:
+
+```nix
+programs.ember.package = ember.packages.${system}.coreSource;
+```
+
 ### Arch, Fedora and derivatives
 
 ```sh

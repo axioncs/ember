@@ -26,29 +26,67 @@
           f (import nixpkgs {
             inherit system;
             config.allowUnfreePredicate =
-              pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "steam" "steam-unwrapped" ];
+              pkg:
+              builtins.elem (nixpkgs.lib.getName pkg) [
+                "steam"
+                "steam-unwrapped"
+              ];
           })
         );
+
+      # The core release a NixOS install downloads instead of compiling.
+      #
+      # Set `coreRelease` to null to always build from the flake input. Leaving
+      # the version in place but the asset unpublished is not a supported state:
+      # the fetch fails and the rebuild stops. Publish the tarball, then point
+      # this at it.
+      coreRelease = {
+        version = "0.6.1";
+        url =
+          "https://github.com/axioncs/ember/releases/download/v0.6.1/ember-v0.6.1-x86_64-linux.tar.gz";
+        sha256 = "4bda3cbf6a5c7ceef542b454361c21abd22a79ddfdee0871c63ccb0ff9d00895";
+      };
     in
     {
       packages = forAllSystems (
         pkgs:
         let
-          core = pkgs.callPackage ./packages/core { src = ember-core; };
+          # Source build. Used directly by `nix build .#core-source`, and as the
+          # fallback when a release is not wired up.
+          coreSource = pkgs.callPackage ./packages/core { src = ember-core; };
+
+          # Prebuilt core: downloads the published artifact, no compilation.
+          coreReleasePkg =
+            if coreRelease == null then
+              null
+            else
+              pkgs.callPackage ./packages/core {
+                release = coreRelease;
+              };
+
           cdp = pkgs.callPackage ./packages/cdp { };
         in
         {
-          inherit core cdp;
+          inherit coreSource cdp;
+
+          # What the module installs by default: the prebuilt artifact, which a
+          # rebuild downloads instead of compiling. Set `coreRelease` to null to
+          # build from source instead.
+          core =
+            if coreRelease == null then
+              coreSource
+            else
+              coreReleasePkg;
 
           cli = pkgs.callPackage ./packages/cli { inherit cdp; };
 
           # Steam with the audit library injected. Usable directly for testing
           # without a system rebuild: nix run .#steam
           steam = pkgs.steam.override {
-            extraEnv.LD_AUDIT = "${core}/lib/ember/ember-core.so";
+            extraEnv.LD_AUDIT = "${self.packages.${pkgs.stdenv.hostPlatform.system}.core}/lib/ember/ember-core.so";
           };
 
-          default = core;
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.core;
         }
       );
 
