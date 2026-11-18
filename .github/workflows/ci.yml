@@ -48,5 +48,5 @@ jobs:
 
       - name: verify the archive
         run: |
-          test -f dist/ci-test-x86_64-linux.tar.gz
-          tar tzf dist/ci-test-x86_64-linux.tar.gz | sort
+          test -f dist/ember-ci-test-x86_64-linux.tar.gz
+          tar tzf dist/ember-ci-test-x86_64-linux.tar.gz | sort
