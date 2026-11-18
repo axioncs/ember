@@ -30,9 +30,13 @@ jobs:
 
       - name: verify the pinned sha256 matches
         run: |
-          set -euo pipefail
-          actual="$(cut -d' ' -f1 "dist/${GITHUB_REF_NAME}-x86_64-linux.tar.gz.sha256" 2>/dev/null \
-            || sha256sum "dist/${GITHUB_REF_NAME}-x86_64-linux.tar.gz" | cut -d' ' -f1)"
+          set -eu
+          artifact="dist/${GITHUB_REF_NAME}-x86_64-linux.tar.gz"
+          if [ -f "$artifact.sha256" ]; then
+            actual="$(cut -d' ' -f1 "$artifact.sha256")"
+          else
+            actual="$(sha256sum "$artifact" | cut -d' ' -f1)"
+          fi
           pinned="$(sed -n 's/.*sha256 = "\([a-f0-9]\{64\}\)".*/\1/p' flake.nix | head -1)"
           echo "actual: $actual"
           echo "pinned: $pinned"
