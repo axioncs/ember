@@ -28,6 +28,19 @@ jobs:
       - name: build and package
         run: sh scripts/build-release.sh "${GITHUB_REF_NAME}"
 
+      - name: verify the pinned sha256 matches
+        run: |
+          set -euo pipefail
+          actual="$(cut -d' ' -f1 "dist/${GITHUB_REF_NAME}-x86_64-linux.tar.gz.sha256" 2>/dev/null \
+            || sha256sum "dist/${GITHUB_REF_NAME}-x86_64-linux.tar.gz" | cut -d' ' -f1)"
+          pinned="$(sed -n 's/.*sha256 = "\([a-f0-9]\{64\}\)".*/\1/p' flake.nix | head -1)"
+          echo "actual: $actual"
+          echo "pinned: $pinned"
+          if [ -n "$pinned" ] && [ "$actual" != "$pinned" ]; then
+            echo "::error::the artifact hash changed; update flake.nix and re-tag"
+            exit 1
+          fi
+
       - name: publish
         uses: softprops/action-gh-release@v2
         with:
