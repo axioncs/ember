@@ -4,13 +4,13 @@
   pkg-config,
   patchelf,
   curl,
-  dbus,
-  luajit,
+  openssl,
+  zlib,
   src,
 }:
 stdenv.mkDerivation {
   pname = "ember-core";
-  version = "0.2.0";
+  version = "0.3.0";
 
   inherit src;
 
@@ -21,12 +21,10 @@ stdenv.mkDerivation {
 
   buildInputs = [
     curl
-    dbus
-    luajit
+    openssl
+    zlib
   ];
 
-  # embed-version.sh reads these instead of shelling out to git, which does not
-  # exist inside the build sandbox.
   env.GIT_COMMIT_HASH = "ember";
   env.BUILD_BRANCH = "ember";
 
@@ -36,30 +34,33 @@ stdenv.mkDerivation {
 
   buildPhase = ''
     runHook preBuild
-    make -j$NIX_BUILD_CORES audit-libs
+    make -j$NIX_BUILD_CORES bin/ember-core.so bin/ember-library-inject.so
+    make -j$NIX_BUILD_CORES bin/pattern-refresh
     runHook postBuild
   '';
 
   installPhase = ''
     runHook preInstall
-    install -Dm755 bin/SLSsteam.so $out/lib/ember/ember-core.so
+    install -Dm755 bin/ember-core.so $out/lib/ember/ember-core.so
+    install -Dm755 bin/ember-library-inject.so $out/lib/ember/ember-library-inject.so
+    install -Dm755 bin/pattern-refresh $out/lib/ember/pattern-refresh
+    install -Dm755 tools/ember-autoupdate.sh $out/lib/ember/ember-autoupdate.sh
     runHook postInstall
   '';
 
-  # Pin dependencies by absolute path: the client's FHS sandbox would otherwise
-  # shadow libcurl/dbus/libstdc++ with older runtime copies.
   postFixup = ''
     patchelf --force-rpath --set-rpath ${
       lib.makeLibraryPath [
         curl
-        dbus
+        openssl
+        zlib
         (lib.getLib stdenv.cc.cc)
       ]
     } $out/lib/ember/ember-core.so
   '';
 
   meta = {
-    description = "ember core — Steam client licensing and depot hook";
+    description = "ember core — Steam client licensing, depot and manifest pipeline";
     homepage = "https://github.com/axioncs/ember";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.linux;
