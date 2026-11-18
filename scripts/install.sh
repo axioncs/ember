@@ -122,7 +122,7 @@ esac
 if [ "$UNINSTALL" = 1 ]; then
 	say "removing ember"
 	rm -f "$DATA_DIR/ember-core.so" "$DATA_DIR/ember.lua" "$DATA_DIR/VERSION"
-	rm -f "$DATA_DIR/ember-cef.so" "$DATA_DIR/ember-cdpd" "$DATA_DIR/badge.js"
+	rm -f "$DATA_DIR/ember-cdpd" "$DATA_DIR/badge.js"
 	rm -f "$DATA_DIR/install-flags"
 	rm -f "$BIN_DIR/steam-ember" "$BIN_DIR/ember"
 	rmdir "$DATA_DIR" 2>/dev/null || true
@@ -254,7 +254,6 @@ install -m755 "$stage/ember-core.so" "$DATA_DIR/ember-core.so"
 install -m644 "$stage/ember.lua" "$DATA_DIR/ember.lua"
 install -m644 "$stage/VERSION" "$DATA_DIR/VERSION"
 
-[ -f "$stage/ember-cef.so" ] && install -m755 "$stage/ember-cef.so" "$DATA_DIR/ember-cef.so"
 [ -f "$stage/ember-cdpd" ] && install -m755 "$stage/ember-cdpd" "$DATA_DIR/ember-cdpd"
 [ -f "$stage/badge.js" ] && install -m644 "$stage/badge.js" "$DATA_DIR/badge.js"
 

@@ -21,7 +21,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             git g++ make pkg-config ca-certificates \
-            libdbus-1-dev libcurl4-openssl-dev libluajit-5.1-dev
+            zlib1g-dev libssl-dev libcurl4-openssl-dev
 
       - uses: actions/checkout@v4
 

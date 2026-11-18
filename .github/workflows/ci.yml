@@ -21,5 +21,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lua5.4
           EMBER_CLI_LIBRARY_ONLY=1 lua5.4 tools/test_ui.lua packages/cli/ember.lua
-      - name: CEF shim test
-        run: sh tools/test_cefshim.sh
+
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git g++ make pkg-config ca-certificates \
+            zlib1g-dev libssl-dev libcurl4-openssl-dev
+
+      - name: fetch ember-core
+        run: |
+          git clone --depth 1 --branch "${EMBER_CORE_REF:-ember}" \
+            https://github.com/axioncs/ember-core ember-core
+
+      - name: build the core
+        working-directory: ember-core
+        run: make -j"$(nproc)" bin/ember-core.so bin/ember-library-inject.so
+
+      - name: install and package
+        run: sh scripts/build-release.sh ci-test
+
+      - name: verify the archive
+        run: |
+          test -f dist/ci-test-x86_64-linux.tar.gz
+          tar tzf dist/ci-test-x86_64-linux.tar.gz | sort
