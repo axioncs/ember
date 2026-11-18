@@ -37,18 +37,13 @@ in
       type = lib.types.bool;
       default = true;
       description = ''
-        Give steamwebhelper a DevTools endpoint, so the store-page layer (badges,
-        themes) has something to attach to: preloads a shim that appends
-        `--remote-debugging-port` when the client spawns the webhelper, and starts
-        the badge agent alongside Steam. It opens a local, unauthenticated
-        debugging port; set this to false to leave the webhelper untouched.
+        Give steamwebhelper a DevTools endpoint so the store-page layer has
+        something to attach to. The core binds the client's exec calls and
+        appends `--remote-debugging-port` when the webhelper is spawned, then
+        publishes the chosen port to <filename>~/.config/ember/cef_port</filename>.
+        The port is local and unauthenticated; set this to false to leave the
+        webhelper untouched.
       '';
-    };
-
-    cefPort = lib.mkOption {
-      type = lib.types.port;
-      default = 8080;
-      description = "Port the DevTools endpoint listens on when cefDebug is enabled.";
     };
 
     cloud = lib.mkOption {
@@ -128,7 +123,11 @@ in
     # Applying the function to the previous arguments merges instead.
     programs.steam.package = cfg.steamPackage.override (prev: {
       extraEnv = (prev.extraEnv or { }) // {
-        LD_AUDIT = "${cfg.package}/lib/ember/ember-core.so";
+        # The libcurl redirector loads first, then the audit library. Both are
+        # LD_AUDIT objects, never LD_PRELOAD: the loader rejects a preload that
+        # calls into the client, and the core binds exec* through la_symbind64
+        # to rewrite the webhelper's --remote-debugging-port argument.
+        LD_AUDIT = "${cfg.package}/lib/ember/ember-library-inject.so:${cfg.package}/lib/ember/ember-core.so";
         # Cloud is read by the library from the environment as well as from
         # config.yaml, so the option wins without rewriting a file the user
         # owns. The CLI reads the same variables, keeping one source of truth.
@@ -136,12 +135,8 @@ in
       } // lib.optionalAttrs (cfg.cloudRemote != null) {
         EMBER_CLOUD_REMOTE = cfg.cloudRemote;
         EMBER_CLOUD_FOLDER = cfg.cloudFolder;
-      } // lib.optionalAttrs cfg.cefDebug {
-        LD_PRELOAD = "${self.packages.${pkgs.stdenv.hostPlatform.system}.cefshim}/lib/ember-cef.so";
-        EMBER_CEF_PORT = toString cfg.cefPort;
-        # The shim starts the badge agent the first time the client spawns the
-        # webhelper, so no unit or wrapper is needed to keep it running.
-        EMBER_AGENT = "${cfg.cli}/bin/ember";
+      } // lib.optionalAttrs (!cfg.cefDebug) {
+        EMBER_CEF = "0";
       };
     });
   };
