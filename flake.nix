@@ -41,12 +41,10 @@
       # tracks a branch that has no release yet, it stays null: pointing it
       # at a tarball that lacks the feature would install the old core and
       # report success.
-      coreRelease = {
-        version = "0.7.1";
-        url =
-          "https://github.com/axioncs/ember/releases/download/v0.7.1/ember-v0.7.1-x86_64-linux.tar.gz";
-        sha256 = "46fdf91237297d61ed78733e8233e5f92c490933c87ab938fc0afb74c18f0196";
-      };
+      # Set when the 0.7.2 artifact is published. While null the core is built
+      # from the ember-core input instead of downloaded, so a rebuild works
+      # before CI finishes rather than failing a bogus hash.
+      coreRelease = null;
     in
     {
       packages = forAllSystems (
