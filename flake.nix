@@ -6,7 +6,7 @@
 
     ember-core = {
       # git, not the github: tarball endpoint, whose fetches truncate here.
-      url = "git+https://github.com/axioncs/ember-core?ref=feat/cloud";
+      url = "git+https://github.com/axioncs/ember-core?ref=ember";
       flake = false;
     };
   };

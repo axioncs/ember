@@ -5,14 +5,14 @@
       "locked": {
         "lastModified": 1795061243,
         "narHash": "sha256-w8b+wFM2we1SsRestr/GCScygTDn56nHSbYMpuzsHNo=",
-        "ref": "feat/cloud",
+        "ref": "ember",
         "rev": "d963b7f225cbc6190391a9d1bacdec3319394272",
         "revCount": 1254,
         "type": "git",
         "url": "https://github.com/axioncs/ember-core"
       },
       "original": {
-        "ref": "feat/cloud",
+        "ref": "ember",
         "type": "git",
         "url": "https://github.com/axioncs/ember-core"
       }
