@@ -989,10 +989,15 @@ local function readContract()
 	return port, how
 end
 
+-- Forward declaration: the store-page helpers below sit above cdpEndpoint but
+-- need the port it resolves. Declaring it here keeps one source of truth for
+-- the endpoint instead of the literal 8080 the badge used to assume.
+local cdpEndpoint
+
 -- The endpoint the client actually published, and how we know. Without a flag
 -- on some webhelper there is nothing to go on but Steam's default port, which
 -- this reports as an assumption rather than a fact.
-local function cdpEndpoint()
+function cdpEndpoint()
 	local port, how = readContract()
 	if port then return port, how end
 
@@ -1039,7 +1044,8 @@ end
 -- The store page ember can draw on. Steam keeps one webview per page it has
 -- visited, so several may match; the last one in the list is the newest.
 local function storeTarget(appid)
-	local body = sh("curl -sS --max-time 2 'http://127.0.0.1:8080/json/list' 2>/dev/null")
+	local port = cdpEndpoint()
+	local body = sh(("curl -sS --max-time 2 'http://127.0.0.1:%d/json/list' 2>/dev/null"):format(port))
 	local chosen
 	for _, target in ipairs(parseTargets(body)) do
 		local id = (target.url or ""):match("^https://store%.steampowered%.com/app/(%d+)")
@@ -1196,7 +1202,10 @@ local function cmdUIWatch(interval, quiet)
 			if idle * interval > 120 then break end
 		end
 
-		local body = sh("curl -sS --max-time 2 'http://127.0.0.1:8080/json/list' 2>/dev/null")
+		-- Resolved every tick: the contract is republished with a new port each
+		-- time the client starts, so caching it here outlives the endpoint.
+		local port = cdpEndpoint()
+		local body = sh(("curl -sS --max-time 2 'http://127.0.0.1:%d/json/list' 2>/dev/null"):format(port))
 		for _, target in ipairs(parseTargets(body)) do
 			local appid = (target.url or ""):match("^https://store%.steampowered%.com/app/(%d+)")
 			if appid and target.ws then
