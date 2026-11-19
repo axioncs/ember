@@ -2,8 +2,9 @@ result
 result-*
 dist/
 
-# Runtime Wine prefix created by the Steamless helper during a real launch
+# Runtime artifacts created by the Steamless helper during a real launch
 steamless-prefix/
+steamless-bin/
 
 # maintainer state doc; local only
 HANDOFF.md
