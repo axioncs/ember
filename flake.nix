@@ -6,7 +6,7 @@
 
     ember-core = {
       # git, not the github: tarball endpoint, whose fetches truncate here.
-      url = "git+https://github.com/axioncs/ember-core?ref=ember";
+      url = "git+https://github.com/axioncs/ember-core?ref=feat/cloud";
       flake = false;
     };
   };
@@ -36,16 +36,12 @@
 
       # The core release a NixOS install downloads instead of compiling.
       #
-      # Set `coreRelease` to null to always build from the flake input. Leaving
-      # the version in place but the asset unpublished is not a supported state:
-      # the fetch fails and the rebuild stops. Publish the tarball, then point
-      # this at it.
-      coreRelease = {
-        version = "0.6.1";
-        url =
-          "https://github.com/axioncs/ember/releases/download/v0.6.1/ember-v0.6.1-x86_64-linux.tar.gz";
-        sha256 = "28e7979c8fa07a6172305add8937e285372923853347af6adde4b23181a9332f";
-      };
+      # Set this when a version is tagged, so a rebuild substitutes the
+      # published artifact instead of building the core. While the input
+      # tracks a branch that has no release yet, it stays null: pointing it
+      # at a tarball that lacks the feature would install the old core and
+      # report success.
+      coreRelease = null;
     in
     {
       packages = forAllSystems (
