@@ -37,6 +37,19 @@ else
 	install -m755 "$work/src/bin/ember-core.so" "$stage/ember-core.so"
 	install -m755 "$work/src/bin/ember-library-inject.so" \
 		"$stage/ember-library-inject.so"
+
+	# SteamStub. The core looks for its helper under tools/ relative to the
+	# library, so the script and the bundled Steamless binaries ship here.
+	# Without them DRM-protected titles fail with "Application load error 6".
+	mkdir -p "$stage/tools/steamstub-bypass"
+	install -m755 "$work/src/tools/steamstub-bypass/"*.sh \
+		"$stage/tools/steamstub-bypass/"
+	cp -a "$work/src/tools/steamless-bin" "$stage/tools/steamless-bin"
+fi
+
+if [ -d "${EMBER_STEAMSTUB_DIR:-}" ]; then
+	mkdir -p "$stage/tools/steamstub-bypass"
+	install -m755 "$EMBER_STEAMSTUB_DIR/"*.sh "$stage/tools/steamstub-bypass/"
 fi
 
 install -m644 "$root/packages/cli/ember.lua" "$stage/ember.lua"

@@ -44,6 +44,18 @@ let
     install -Dm755 bin/ember-library-inject.so $out/lib/ember/ember-library-inject.so
     install -Dm755 bin/pattern-refresh $out/lib/ember/pattern-refresh
     install -Dm755 tools/ember-autoupdate.sh $out/lib/ember/ember-autoupdate.sh
+
+    # SteamStub. The core resolves its helper relative to its own install
+    # root, so the script and the bundled Steamless binaries have to sit
+    # under tools/ beside the library. Without them DRM-protected titles
+    # fail at launch with "Application load error 6".
+    install -Dm755 tools/steamstub-bypass/run-steamless.sh \
+      $out/lib/ember/tools/steamstub-bypass/run-steamless.sh
+    install -Dm755 tools/steamstub-bypass/install-steamless.sh \
+      $out/lib/ember/tools/steamstub-bypass/install-steamless.sh
+    install -Dm755 tools/steamstub-bypass/scan-all.sh \
+      $out/lib/ember/tools/steamstub-bypass/scan-all.sh
+    cp -a tools/steamless-bin $out/lib/ember/tools/steamless-bin
     runHook postInstall
   '';
 
@@ -110,6 +122,10 @@ let
         install -Dm644 badge.js $out/lib/ember/badge.js
         install -Dm644 ember.lua $out/lib/ember/ember.lua
         install -Dm644 VERSION $out/lib/ember/VERSION
+        install -Dm755 ember-autoupdate.sh $out/lib/ember/ember-autoupdate.sh 2>/dev/null || true
+        if [ -d tools ]; then
+          cp -a tools $out/lib/ember/tools
+        fi
         runHook postInstall
       '';
     });
