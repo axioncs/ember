@@ -61,6 +61,19 @@ local function listFiles(dir, suffix)
 	return out
 end
 
+-- Subdirectory names, full paths. Used where a per-account or per-app
+-- directory has to be matched without knowing the level above it.
+local function listDirs(dir)
+	local out = {}
+	if not isDir(dir) then return out end
+	for name in sh("ls -1 '" .. dir .. "' 2>/dev/null"):gmatch("[^\n]+") do
+		local path = dir .. "/" .. name
+		if isDir(path) then table.insert(out, path) end
+	end
+	table.sort(out)
+	return out
+end
+
 local function readFile(path)
 	local f = io.open(path, "r")
 	if not f then return nil end
@@ -516,19 +529,69 @@ local function cmdDoctor()
 	return 0
 end
 
+-- Everything a single imported app leaves outside its own script: the depot
+-- manifests it pinned, its cached ownership tickets, its staged depotcache
+-- blobs, and its cloud saves. Both `remove` and `remove all` go through here so
+-- a bulk removal is not a weaker version of the single one.
+--
+-- Deliberately NOT touched: config.yaml (ember keeps working, just with fewer
+-- apps), the Steam client itself, and any app the account actually owns.
+local function forgetApp(appid, keepManifests)
+	local script = stplugDir() .. "/" .. appid .. ".lua"
+	if not isFile(script) then
+		return false, "nothing imported for " .. appid
+	end
+
+	local sc = scanScript(script)
+	local removedManifests, removedTickets, removedDepots = 0, 0, 0
+
+	for depot, gid in pairs(sc.pinGid) do
+		local name = depot .. "_" .. gid .. ".manifest"
+		local pinned = storeDir() .. "/" .. name
+		if (not keepManifests or not keepManifests[name]) and isFile(pinned) then
+			ok("rm -f '" .. pinned .. "'")
+			removedManifests = removedManifests + 1
+		end
+		-- The client purges depotcache entries for an app whose update it
+		-- cancels, so these are cache, not data: safe to drop.
+		local staged = depotCacheDir() .. "/" .. name
+		if isFile(staged) then
+			ok("rm -f '" .. staged .. "'")
+			removedDepots = removedDepots + 1
+		end
+	end
+
+	for _, name in ipairs({ "ticket_", "encryptedTicket_" }) do
+		local path = configDir() .. "/cache/" .. name .. appid .. ".yaml"
+		if isFile(path) then
+			ok("rm -f '" .. path .. "'")
+			removedTickets = removedTickets + 1
+		end
+	end
+
+	-- Cloud saves live per account, and the account id is not known here: match
+	-- the app directory under any account rather than guessing one.
+	local cloudRoot = configDir() .. "/cloud"
+	for _, account in ipairs(listDirs(cloudRoot)) do
+		local path = account .. "/" .. appid
+		if isDir(path) then
+			ok("rm -rf '" .. path .. "'")
+		end
+	end
+
+	ok("rm -f '" .. script .. "'")
+	return true, {
+		manifests = removedManifests,
+		tickets = removedTickets,
+		depots = removedDepots,
+	}
+end
+
 local function cmdRemove(appid)
 	if not appid or not appid:match("^%d+$") then
 		io.stderr:write("ember: usage: ember remove <appid>\n")
 		return 2
 	end
-
-	local script = stplugDir() .. "/" .. appid .. ".lua"
-	if not isFile(script) then
-		io.stderr:write("ember: nothing imported for " .. appid .. "\n")
-		return 1
-	end
-
-	local sc = scanScript(script)
 
 	-- A depot manifest can be pinned by more than one app, so keep whatever the
 	-- remaining scripts still reference.
@@ -542,19 +605,83 @@ local function cmdRemove(appid)
 		end
 	end
 
-	local removed = 0
-	for depot, gid in pairs(sc.pinGid) do
-		local name = depot .. "_" .. gid .. ".manifest"
-		if not keep[name] and isFile(storeDir() .. "/" .. name) then
-			ok("rm -f '" .. storeDir() .. "/" .. name .. "'")
-			removed = removed + 1
+	local done, detail = forgetApp(appid, keep)
+	if not done then
+		io.stderr:write("ember: " .. tostring(detail) .. "\n")
+		return 1
+	end
+
+	-- Touch the config so the watcher reloads without waiting for a change.
+	ok("touch '" .. configDir() .. "/config.yaml'")
+
+	print(string.format("removed %s: 1 script, %d manifest(s), %d ticket(s), %d depotcache entr(ies)",
+		appid, detail.manifests, detail.tickets, detail.depots))
+	return 0
+end
+
+-- Every imported app id, taken from the stplug-in scripts themselves rather than
+-- from `ember list` output, so the answer is the same whether or not a client
+-- is running.
+local function importedAppIds()
+	local scripts = listFiles(stplugDir(), ".lua")
+	table.sort(scripts, function(a, b)
+		local na = tonumber(a:match("^(%d+)")) or 0
+		local nb = tonumber(b:match("^(%d+)")) or 0
+		if na ~= nb then return na < nb end
+		return a < b
+	end)
+	local ids = {}
+	for _, name in ipairs(scripts) do
+		local appid = name:match("^(%d+)")
+		if appid then table.insert(ids, appid) end
+	end
+	return ids
+end
+
+-- Removes every imported app. Apps the account owns are not touched, and
+-- neither is ember itself: `ember uninstall` is the teardown.
+--
+-- Manifests are swept after the apps, because a depot can be pinned by several
+-- of them: with the scripts gone, anything still in the store is unreferenced.
+-- That is a bounded fix-up, not a retry loop.
+local function cmdRemoveAll()
+	local ids = importedAppIds()
+	if #ids == 0 then
+		print("no imported apps to remove")
+		return 0
+	end
+
+	local scripts, manifests, tickets, depots, failed = 0, 0, 0, 0, 0
+	for _, appid in ipairs(ids) do
+		io.write(("remove %s ... "):format(appid))
+		io.flush()
+		local done, detail = forgetApp(appid, nil)
+		if done then
+			scripts = scripts + 1
+			manifests = manifests + detail.manifests
+			tickets = tickets + detail.tickets
+			depots = depots + detail.depots
+			print("ok")
+		else
+			failed = failed + 1
+			print("failed (" .. tostring(detail) .. ")")
 		end
 	end
 
-	ok("rm -f '" .. script .. "'")
+	for _, name in ipairs(listFiles(storeDir(), ".manifest")) do
+		ok("rm -f '" .. storeDir() .. "/" .. name .. "'")
+		manifests = manifests + 1
+	end
+
+	-- Touch the config so the watcher reloads whether or not every app went.
 	ok("touch '" .. configDir() .. "/config.yaml'")
 
-	print(string.format("removed %s: 1 script, %d manifest(s)", appid, removed))
+	print(string.format("removed %d app(s): %d manifest(s), %d ticket(s), %d depotcache entr(ies)",
+		scripts, manifests, tickets, depots))
+	if failed > 0 then
+		print(string.format("%d app(s) could not be removed", failed))
+		return 1
+	end
 	return 0
 end
 
@@ -571,6 +698,52 @@ end
 local function latestVersion()
 	local body = sh("curl -fsSL https://api.github.com/repos/axioncs/ember/releases/latest 2>/dev/null")
 	return body:match('"tag_name"%s*:%s*"([^"]+)"') or ""
+end
+
+-- Tears ember out of the machine: the imported apps, then the wrapper, desktop
+-- entries and shell rc edits, by handing off to the installer's own uninstall.
+-- On NixOS none of that is ember's to remove — the module owns it — so this says
+-- what to do instead of pretending to succeed.
+local function cmdUninstall()
+	if isFile("/etc/NIXOS") then
+		print("ember is managed by the NixOS module here; it cannot uninstall itself.")
+		print("")
+		print("  remove imported apps:  ember remove all")
+		print("  disable the module:    edit ~/nixos, set programs.ember.enable = false")
+		print("  then:                  nh os switch ~/nixos")
+		print("")
+		print("  ember remove all is still safe to run first: it clears the apps")
+		print("  the module's rebuild will not touch.")
+		return 1
+	end
+
+	local setup = nil
+	for _, candidate in ipairs({
+		dataDir() .. "/setup.sh",
+		scriptDir() .. "/setup.sh",
+		home() .. "/.local/share/ember/setup.sh",
+	}) do
+		if isFile(candidate) then setup = candidate break end
+	end
+
+	if setup then
+		print("removing imported apps first ...")
+		cmdRemoveAll()
+		print("")
+		return sh(("bash '%s' uninstall"):format(setup)) and 0 or 1
+	end
+
+	-- No installer to hand off to (source checkout). Fall back to clearing the
+	-- state ember owns, and say plainly that the rest is manual.
+	print("no setup.sh found; clearing ember's own state only")
+	cmdRemoveAll()
+	ok("rm -rf '" .. configDir() .. "/cache'")
+	ok("rm -rf '" .. configDir() .. "/cloud'")
+	ok("rm -rf '" .. configDir() .. "/ui-agent.log'")
+	print("")
+	print("the wrapper, desktop entries and shell rc edits need the installer:")
+	print("  sh setup.sh uninstall")
+	return 0
 end
 
 local function cmdUpdate(checkOnly)
@@ -1286,12 +1459,16 @@ ember — Steam library tooling
 
   ember import <file.lua|file.zip>   import a script or a manifest archive
   ember remove <appid>               drop an imported app and its manifests
+  ember remove all                   drop every imported app (keeps ember)
   ember list                         show imported scripts and stored manifests
   ember status                       show client, store and depotcache state
   ember ui [status]                  show the store-page injection endpoint
   ember cloud <push|pull|status>     sync saves to your own storage (rclone)
   ember doctor                       check the whole stack and say what is wrong
   ember update [--check]             update to the latest release
+  ember uninstall                    remove ember itself, apps and all
+
+  Apps the account owns are never touched by remove or remove all.
 ]])
 end
 
@@ -1304,6 +1481,9 @@ local command = arg[1]
 if command == "import" then
 	os.exit(cmdImport(arg[2]))
 elseif command == "remove" then
+	if arg[2] == "all" then
+		os.exit(cmdRemoveAll())
+	end
 	os.exit(cmdRemove(arg[2]))
 elseif command == "list" then
 	os.exit(cmdList())
@@ -1322,6 +1502,8 @@ elseif command == "cloud" then
 	elseif sub == "pull" then os.exit(cmdCloudPull())
 	elseif sub == "status" then os.exit(cmdCloudStatus())
 	else os.exit(cmdCloud()) end
+elseif command == "uninstall" then
+	os.exit(cmdUninstall())
 else
 	usage()
 	os.exit(command == nil and 0 or 1)
