@@ -121,7 +121,8 @@ esac
 
 if [ "$UNINSTALL" = 1 ]; then
 	say "removing ember"
-	rm -f "$DATA_DIR/ember-core.so" "$DATA_DIR/ember.lua" "$DATA_DIR/VERSION"
+	rm -f "$DATA_DIR/ember-core.so" "$DATA_DIR/ember-library-inject.so" \
+		"$DATA_DIR/ember.lua" "$DATA_DIR/VERSION"
 	rm -f "$DATA_DIR/ember-cdpd" "$DATA_DIR/badge.js"
 	rm -f "$DATA_DIR/install-flags"
 	rm -f "$BIN_DIR/steam-ember" "$BIN_DIR/ember"
