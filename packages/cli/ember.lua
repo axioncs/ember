@@ -267,27 +267,71 @@ local function cmdList()
 	return 0
 end
 
-local function cmdStatus()
-	print("steam root:     " .. steamRoot())
-
+-- The Steam process tree, classified. The client is the process named exactly
+-- "steam"; the others are pressure-vessel (srt-bwrap, pv-adverb) and helper
+-- children whose cmdline also contains steamrt64/steam.
+--
+-- The core's setup() returns before creating its log unless the process name is
+-- "steam", so a library mapped into a helper is mapped and inert: no log, no
+-- hooks, no marker. "Is the core in some pid's maps" is therefore the wrong
+-- question, and it is what made `ember status` and `ember doctor` disagree.
+local function steamProcesses()
 	local pids = {}
 	for pid in sh("pgrep -f 'steamrt64/stea[m]' 2>/dev/null"):gmatch("%d+") do
 		table.insert(pids, pid)
 	end
 
-	if #pids == 0 then
+	local function comm(pid)
+		return trim(sh("cat /proc/" .. pid .. "/comm 2>/dev/null"))
+	end
+	local function coreIn(pid)
+		local hit = trim(sh("grep -o '/[^ ]*ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1"))
+		return hit ~= "" and hit or nil
+	end
+
+	local clientPid, clientSeen, helperCorePid, helperCorePath
+	for _, pid in ipairs(pids) do
+		if comm(pid) == "steam" then
+			clientSeen = true
+			if coreIn(pid) then clientPid = pid end
+		elseif not helperCorePath then
+			local hit = coreIn(pid)
+			if hit then helperCorePid, helperCorePath = pid, hit end
+		end
+	end
+
+	return {
+		pids = pids,
+		clientSeen = clientSeen,
+		clientPid = clientPid,
+		helperCorePid = helperCorePid,
+		helperCorePath = helperCorePath,
+		corePath = clientPid and coreIn(clientPid) or nil,
+		comm = comm,
+	}
+end
+
+local function cmdStatus()
+	print("steam root:     " .. steamRoot())
+
+	local p = steamProcesses()
+
+	if #p.pids == 0 then
 		print("client:         not running")
 		print("core loaded:    no")
+	elseif not p.clientSeen then
+		print(string.format("client:         %d process(es), none named steam", #p.pids))
+		print("core loaded:    no")
+	elseif p.corePath then
+		print(string.format("client:         running (%d process(es))", #p.pids))
+		print("core loaded:    yes")
+	elseif p.helperCorePath then
+		print(string.format("client:         running (%d process(es))", #p.pids))
+		print(string.format("core loaded:    no - only in %s (pid %d)",
+			p.comm(p.helperCorePid), p.helperCorePid))
 	else
-		local loaded = false
-		for _, pid in ipairs(pids) do
-			if trim(sh("grep -c ember-core /proc/" .. pid .. "/maps 2>/dev/null")) ~= "0" then
-				loaded = true
-				break
-			end
-		end
-		print(string.format("client:         running (%d process(es))", #pids))
-		print("core loaded:    " .. (loaded and "yes" or "no"))
+		print(string.format("client:         running (%d process(es))", #p.pids))
+		print("core loaded:    no")
 	end
 
 	print(string.format("stplug-in:      %d script(s)", #listFiles(stplugDir(), ".lua")))
@@ -387,56 +431,41 @@ local function cmdDoctor()
 		line("steam root", "not found", "fail")
 	end
 
-	local pids = {}
-	for pid in sh("pgrep -f 'steamrt64/stea[m]' 2>/dev/null"):gmatch("%d+") do
-		table.insert(pids, pid)
-	end
+	local p = steamProcesses()
+	local pids = p.pids
 
-	-- The client is the process named "steam"; the rest of the tree is
-	-- pressure-vessel (srt-bwrap, pv-adverb) and helper children. The core's
-	-- setup() bails unless the process name is exactly "steam", so a library
-	-- mapped into a helper is loaded and inert: no log, no hooks, no marker.
-	-- Counting it as "core loaded" hides the whole stack being dead.
-	local function procName(pid)
-		return trim(sh("cat /proc/" .. pid .. "/comm 2>/dev/null"))
-	end
-	local function coreIn(pid)
-		local hit = trim(sh("grep -o '/[^ ]*ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1"))
-		return hit ~= "" and hit or nil
-	end
-
-	local clientPid, helperCorePid, helperCorePath
-	for _, pid in ipairs(pids) do
-		if procName(pid) == "steam" then
-			if coreIn(pid) then clientPid = pid end
-			if not clientPid and not coreIn(pid) then clientPid = nil end
-		elseif not helperCorePath then
-			local hit = coreIn(pid)
-			if hit then helperCorePid, helperCorePath = pid, hit end
-		end
-	end
-	-- Client pid regardless of whether it has the core: needed for the LD_AUDIT
-	-- distinction below.
-	local anyClient
-	for _, pid in ipairs(pids) do
-		if procName(pid) == "steam" then anyClient = pid break end
-	end
-
-	local corePath = clientPid and coreIn(clientPid) or ""
+	local corePath = p.corePath or ""
 	if #pids == 0 then
 		line("client", "not running", "fail")
 		line("core", "-", "fail")
-	elseif not anyClient then
+	elseif not p.clientSeen then
+		-- His case: eight processes match the steam cmdline and none is named
+		-- "steam". Say what they are rather than only that nothing matched —
+		-- the comm names are what distinguish a snap/flatpak client, a renamed
+		-- one, or a client that is not actually running.
 		line("client", string.format("%d process(es), none named steam", #pids), "fail")
+		local names = {}
+		for _, pid in ipairs(pids) do
+			local c = p.comm(pid)
+			if c ~= "" then names[c] = (names[c] or 0) + 1 end
+		end
+		local parts = {}
+		for name, n in pairs(names) do
+			table.insert(parts, string.format("%s x%d", name, n))
+		end
+		table.sort(parts)
+		if #parts > 0 then
+			line("processes", table.concat(parts, ", "), "info")
+		end
 		line("core", "-", "fail")
 	else
 		line("client", string.format("running (%d process(es))", #pids), "ok")
 		if corePath ~= "" then
 			line("core", corePath:match("([^/]+/[^/]+/[^/]+)$") or corePath, "ok")
-		elseif helperCorePath then
+		elseif p.helperCorePath then
 			-- The strongest single signal in this stack: mapped somewhere that
 			-- is not the client, therefore never initialised.
-			line("core", "loaded in " .. procName(helperCorePid) .. " (pid " .. helperCorePid
+			line("core", "loaded in " .. p.comm(p.helperCorePid) .. " (pid " .. p.helperCorePid
 				.. "), not the client", "fail")
 		else
 			-- Distinguish "never asked to load" from "asked and failed".
@@ -539,7 +568,7 @@ local function cmdDoctor()
 		-- setup() creates this log before it does anything else, so an empty
 		-- one with a client running means the core never initialised. It is
 		-- the same fault the core line reports; say it once, as a failure.
-		local state = anyClient and "fail" or "info"
+		local state = p.clientSeen and "fail" or "info"
 		line("log", "empty - the core never initialised", state)
 	else
 		if log:find("Failed to find all patterns", 1, true) then
