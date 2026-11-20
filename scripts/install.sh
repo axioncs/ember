@@ -277,7 +277,7 @@ for dir in \$PATH; do
 	[ -x "\$dir/steam" ] || continue
 	resolved="\$(readlink -f "\$dir/steam" 2>/dev/null || true)"
 	[ -n "\$resolved" ] || continue
-	[ "$resolved" = "$self" ] && continue
+	[ "\$resolved" = "\$self" ] && continue
 	[ -n "\$shim" ] && [ "\$resolved" = "\$shim" ] && continue
 	real="\$dir/steam"
 	break
