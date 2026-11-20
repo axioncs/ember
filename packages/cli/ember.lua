@@ -1624,10 +1624,19 @@ local function cmdUI(sub, arg2)
 	if #targets == 0 then
 		print(string.format("%-18s%s", "targets", "none, the endpoint is not answering"))
 		print("")
-		print("The DevTools endpoint is closed. Steam only opens it when remote")
-		print("debugging is enabled, and ember does not enable it yet: the marker")
-		print("and the webhelper flag both have to be checked against the running")
-		print("client before that switch is written.")
+		if not isFile(marker) then
+			print("The core creates this marker on every start, so its absence means the")
+			print("library is not loading into the client - check `ember status` and")
+			print("~/.ember.log. Steam reads the marker only at startup.")
+		elseif #helpers == 0 then
+			print("The marker is in place but no webhelper is running: start Steam.")
+		else
+			print("The marker is in place, but the running client did not see it.")
+			print("Steam reads it only at startup, so restart Steam.")
+		end
+		print("")
+		print("A closed endpoint is not the badge being off: 'ember ui watch' is what")
+		print("draws it, and it needs the endpoint to exist.")
 		return 1
 	end
 

@@ -119,8 +119,63 @@ EOF
 		;;
 esac
 
+# The store-page badge is drawn by a companion process, not by the library: the
+# core creates Steam's remote-debugging marker and rewrites the webhelper's port
+# argument, but something has to speak DevTools to the page. On NixOS that is a
+# systemd user unit declared in modules/nixos.nix. The script install has no
+# module, so without this the endpoint is live and the badge never appears —
+# "Steam has no ember at all" while the library demonstrably works.
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+install_user_units() {
+	command -v systemctl >/dev/null 2>&1 || {
+		say "no systemd user manager; run 'ember ui watch' yourself"
+		return 0
+	}
+	mkdir -p "$UNIT_DIR"
+	# Type=simple + Restart=on-failure: the watcher blocks while Steam runs and
+	# exits when it does, which is a normal shutdown, not a failure. Restart=
+	# always would turn that into a restart loop.
+	cat > "$UNIT_DIR/ember-ui-watch.service" <<EOF
+[Unit]
+Description=ember store-page badge watcher
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$BIN_DIR/ember ui watch --quiet
+Restart=on-failure
+RestartSec=5
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target
+EOF
+	systemctl --user daemon-reload >/dev/null 2>&1 || true
+	if systemctl --user enable --now ember-ui-watch.service >/dev/null 2>&1; then
+		say "badge watcher enabled (ember-ui-watch.service)"
+	else
+		# Enabling needs a reachable user manager; an installer run over ssh or
+		# from a non-graphical tty has none. Say so rather than reporting success,
+		# because an inert unit is indistinguishable from a working badge.
+		say "wrote $UNIT_DIR/ember-ui-watch.service but could not enable it"
+		say "  enable it from your desktop session: systemctl --user enable --now ember-ui-watch.service"
+	fi
+}
+
+remove_user_units() {
+	command -v systemctl >/dev/null 2>&1 &&
+		systemctl --user disable --now ember-ui-watch.service >/dev/null 2>&1 || true
+	rm -f "$UNIT_DIR/ember-ui-watch.service"
+	command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload >/dev/null 2>&1 || true
+	return 0
+}
+
 if [ "$UNINSTALL" = 1 ]; then
 	say "removing ember"
+	remove_user_units
 	rm -f "$DATA_DIR/ember-core.so" "$DATA_DIR/ember-library-inject.so" \
 		"$DATA_DIR/ember.lua" "$DATA_DIR/VERSION"
 	rm -f "$DATA_DIR/ember-cdpd" "$DATA_DIR/badge.js"
@@ -457,6 +512,11 @@ else
 	# `ember update` replays this, so an update cannot turn the patch back on.
 	printf '%s\n' '--no-steam-patch' > "$DATA_DIR/install-flags"
 fi
+
+# The badge is a separate process from the library, so it is installed whether or
+# not Steam's launchers were patched: --no-steam-patch is about launch paths, not
+# about turning the UI layer off.
+install_user_units
 
 # A running client keeps the library that was loaded at its start, so a fresh
 # install only takes effect on the next launch.
