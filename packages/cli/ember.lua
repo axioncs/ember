@@ -392,24 +392,52 @@ local function cmdDoctor()
 		table.insert(pids, pid)
 	end
 
-	local corePath = ""
+	-- The client is the process named "steam"; the rest of the tree is
+	-- pressure-vessel (srt-bwrap, pv-adverb) and helper children. The core's
+	-- setup() bails unless the process name is exactly "steam", so a library
+	-- mapped into a helper is loaded and inert: no log, no hooks, no marker.
+	-- Counting it as "core loaded" hides the whole stack being dead.
+	local function procName(pid)
+		return trim(sh("cat /proc/" .. pid .. "/comm 2>/dev/null"))
+	end
+	local function coreIn(pid)
+		local hit = trim(sh("grep -o '/[^ ]*ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1"))
+		return hit ~= "" and hit or nil
+	end
+
+	local clientPid, helperCorePid, helperCorePath
+	for _, pid in ipairs(pids) do
+		if procName(pid) == "steam" then
+			if coreIn(pid) then clientPid = pid end
+			if not clientPid and not coreIn(pid) then clientPid = nil end
+		elseif not helperCorePath then
+			local hit = coreIn(pid)
+			if hit then helperCorePid, helperCorePath = pid, hit end
+		end
+	end
+	-- Client pid regardless of whether it has the core: needed for the LD_AUDIT
+	-- distinction below.
+	local anyClient
+	for _, pid in ipairs(pids) do
+		if procName(pid) == "steam" then anyClient = pid break end
+	end
+
+	local corePath = clientPid and coreIn(clientPid) or ""
 	if #pids == 0 then
 		line("client", "not running", "fail")
 		line("core", "-", "fail")
+	elseif not anyClient then
+		line("client", string.format("%d process(es), none named steam", #pids), "fail")
+		line("core", "-", "fail")
 	else
 		line("client", string.format("running (%d process(es))", #pids), "ok")
-		for _, pid in ipairs(pids) do
-			-- Any path ending in ember-core: the NixOS module uses a store path,
-			-- the installer uses ~/.local/share/ember.
-			local hit = sh("grep -o '/[^ ]*ember-core[^ ]*' /proc/" .. pid .. "/maps 2>/dev/null | head -1")
-			hit = trim(hit)
-			if hit ~= "" then
-				corePath = hit
-				break
-			end
-		end
 		if corePath ~= "" then
 			line("core", corePath:match("([^/]+/[^/]+/[^/]+)$") or corePath, "ok")
+		elseif helperCorePath then
+			-- The strongest single signal in this stack: mapped somewhere that
+			-- is not the client, therefore never initialised.
+			line("core", "loaded in " .. procName(helperCorePid) .. " (pid " .. helperCorePid
+				.. "), not the client", "fail")
 		else
 			-- Distinguish "never asked to load" from "asked and failed".
 			local audit = ""
@@ -508,7 +536,11 @@ local function cmdDoctor()
 
 	local log = sh("cat " .. home() .. "/.ember.log 2>/dev/null | tr -d '\\0'")
 	if log == "" then
-		line("log", "empty or unreadable", "info")
+		-- setup() creates this log before it does anything else, so an empty
+		-- one with a client running means the core never initialised. It is
+		-- the same fault the core line reports; say it once, as a failure.
+		local state = anyClient and "fail" or "info"
+		line("log", "empty - the core never initialised", state)
 	else
 		if log:find("Failed to find all patterns", 1, true) then
 			local names = {}
