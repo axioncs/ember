@@ -41,7 +41,12 @@
       # tracks a branch that has no release yet, it stays null: pointing it
       # at a tarball that lacks the feature would install the old core and
       # report success.
-      coreRelease = null;
+      coreRelease = {
+        version = "0.7.4";
+        url =
+          "https://github.com/axioncs/ember/releases/download/v0.7.4/ember-v0.7.4-x86_64-linux.tar.gz";
+        sha256 = "b27f2556b35d6cb1a7788866eee6a01c279dfb54e91e1ff498114a38d60b6de5";
+      };
     in
     {
       packages = forAllSystems (
