@@ -47,7 +47,12 @@
       # stale hash fails the tag's own verify step. `nix build .#core` builds
       # from source in that window — slower, but it cannot install the wrong
       # library.
-      coreRelease = null;
+      coreRelease = {
+        version = "0.7.6";
+        url =
+          "https://github.com/axioncs/ember/releases/download/v0.7.6/ember-v0.7.6-x86_64-linux.tar.gz";
+        sha256 = "1752cd4e4becec788f7f17f87b929e89e5a11e684225f11d8e24201c682e6c22";
+      };
     in
     {
       packages = forAllSystems (
