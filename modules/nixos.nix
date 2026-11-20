@@ -88,6 +88,42 @@ in
         ember.
       '';
     };
+
+    uiWatch = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Run the store-page badge watcher as a user service. Steam only opens a
+        DevTools endpoint for the webhelper when
+        <filename>~/.local/share/Steam/.cef-enable-remote-debugging</filename>
+        exists; the core creates it, and this service is what draws the badge
+        into each store page while Steam runs. Without it the endpoint is live
+        and the badge never appears.
+      '';
+    };
+
+    cloudSync = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Periodically push ember's save store to the rclone remote named by
+        <option>cloudRemote</option>. Off by default: the push runs
+        <command>rclone sync</command>, which makes the remote match this
+        machine, and a timer running that against a remote you have not
+        configured produces a journal entry every interval.
+      '';
+    };
+
+    cloudSyncInterval = lib.mkOption {
+      type = lib.types.str;
+      default = "15min";
+      description = ''
+        systemd calendar interval between cloud save pushes. Any value
+        <option>systemd.time</option> accepts, e.g. <literal>15min</literal>,
+        <literal>1h</literal>, <literal>30s</literal>. Ignored unless
+        <option>cloudSync</option> is enabled.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -103,6 +139,49 @@ in
     ];
 
     environment.systemPackages = [ cfg.cli ];
+
+    # The badge watcher is a user unit, not a system one: it needs the user's
+    # curl, pgrep and rclone, and it must die with the graphical session. The
+    # core creates Steam's remote-debugging marker, so the endpoint exists; this
+    # is what draws into it.
+    systemd.user.services.ember-ui-watch = lib.mkIf cfg.uiWatch {
+      description = "ember store-page badge watcher";
+      after = [ "graphical-session.target" ];
+      wantedBy = [ "default.target" ];
+
+      serviceConfig = {
+        ExecStart = "${cfg.cli}/bin/ember ui watch --quiet";
+        Restart = "on-failure";
+        RestartSec = 5;
+        Nice = 10;
+        IOSchedulingClass = "idle";
+      };
+    };
+
+    # Cloud sync is opt-in. `rclone sync` makes the remote match this machine,
+    # so a timer against an unconfigured remote fails every interval.
+    systemd.user.services.ember-cloud-push = lib.mkIf cfg.cloudSync {
+      description = "Push ember cloud saves to the configured rclone remote";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${cfg.cli}/bin/ember cloud push";
+        TimeoutStartSec = 600;
+        Nice = 10;
+        IOSchedulingClass = "idle";
+      };
+    };
+
+    systemd.user.timers.ember-cloud-push = lib.mkIf cfg.cloudSync {
+      description = "Periodic ember cloud save push";
+      wantedBy = [ "timers.target" ];
+
+      timerConfig = {
+        OnBootSec = "5min";
+        OnUnitActiveSec = cfg.cloudSyncInterval;
+        Persistent = true;
+        Unit = "ember-cloud-push.service";
+      };
+    };
 
     # The CLI runs in an ordinary shell, so it cannot see extraEnv — that one
     # only reaches Steam's container. Session variables give `ember cloud` the
