@@ -12,7 +12,7 @@
 }:
 stdenv.mkDerivation {
   pname = "ember-cli";
-  version = "0.7.5";
+  version = "0.7.6";
 
   src = ./.;
 

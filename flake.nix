@@ -41,12 +41,13 @@
       # tracks a branch that has no release yet, it stays null: pointing it
       # at a tarball that lacks the feature would install the old core and
       # report success.
-      coreRelease = {
-        version = "0.7.5";
-        url =
-          "https://github.com/axioncs/ember/releases/download/v0.7.5/ember-v0.7.5-x86_64-linux.tar.gz";
-        sha256 = "3bcc13cc25c620f4156cf28d180983839d1e1d12a96637518bec31e3806e645d";
-      };
+      #
+      # null is also the correct state between tagging a release and pinning
+      # its artifact: the hash cannot be known until CI has built it, and a
+      # stale hash fails the tag's own verify step. `nix build .#core` builds
+      # from source in that window — slower, but it cannot install the wrong
+      # library.
+      coreRelease = null;
     in
     {
       packages = forAllSystems (
