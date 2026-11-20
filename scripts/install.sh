@@ -319,6 +319,68 @@ EOF
 	esac
 }
 
+# Rewrites an Exec= value so it runs the launcher instead of steam, keeping the
+# field codes and any arguments.
+#
+# sed is wrong here: `Exec=env VAR=1 steam %U` would become
+# `Exec=<launcher> VAR=1 steam %U`, which passes a bogus `VAR=1 steam` to Steam
+# instead of setting the variable. Tokenize instead: keep a leading `env` and its
+# assignments, replace the first steam token, drop the rest. Anything that is not
+# an env-prefixed or plain steam command is returned unchanged so an entry we do
+# not understand is never rewritten into something broken.
+rewrite_exec() {
+	_log=""
+	printf '%s\n' "$1" | awk -v launcher="$BIN_DIR/steam-ember" '
+		{
+			text = $0
+			out = ""
+			# Split into tokens on unquoted whitespace, honouring the
+			# backslash escapes the desktop-entry spec allows.
+			n = 0
+			while (length(text) > 0) {
+				tok = ""
+				while (length(text) > 0) {
+					c = substr(text, 1, 1)
+					if (c == "\\" && length(text) > 1) { tok = tok substr(text, 1, 2); text = substr(text, 3); continue }
+					if (c == " " || c == "	") break
+					tok = tok c; text = substr(text, 2)
+				}
+				while (length(text) > 0 && (substr(text,1,1) == " " || substr(text,1,1) == "	")) text = substr(text, 2)
+				if (tok != "") { n++; t[n] = tok }
+				if (length(text) == 0) break
+			}
+			if (n == 0) { print; exit }
+
+			i = 1
+			env_prefix = ""
+			assignments = ""
+			if (t[i] == "env") {
+				i++
+				env_prefix = "env"
+				while (i <= n && t[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+					assignments = assignments " " t[i]
+					i++
+				}
+				if (i > n) { print; exit }
+			}
+
+			base = t[i]
+			sub(/.*\//, "", base)
+			if (base != "steam") { print; exit }
+
+			# `env` must stay in front of its assignments, so the wrapper is
+			# inserted after them rather than at the head of the line.
+			if (env_prefix == "") {
+				printf "%s", launcher
+			} else {
+				printf "%s%s %s", env_prefix, assignments, launcher
+			}
+			for (j = i + 1; j <= n; j++) printf " %s", t[j]
+			printf "\n"
+		}
+	'
+}
+
 # The desktop entry is the path a dock, the applications menu and steam:// links
 # take. A user-level file with the same name shadows the packaged one, so no
 # root and no pacman-managed file is touched.
@@ -341,12 +403,43 @@ patch_steam_entry() {
 		cp -f "$entry" "$entry.pre-ember"
 		say "kept the existing override as $entry.pre-ember"
 	fi
-	# Every Exec goes through the launcher, keeping its arguments (%U included);
-	# `Exec=env ... steam` and `-bigpicture` variants survive the rewrite.
-	sed -e "s|^Exec=[^ ]*|Exec=$BIN_DIR/steam-ember|" \
-		-e "/^\[Desktop Entry\]/a $MARKER=true" \
-		"$system_entry" > "$entry.tmp"
-	mv -f "$entry.tmp" "$entry"
+
+	# Rewrite Exec= lines in place, one at a time, so each replacement is the
+	# tokenizer's own output rather than a pattern match over the whole file.
+	# A line that does not tokenize to a steam command keeps its original text.
+	# The marker is inserted by a separate pass, so the Exec loop stays a pure
+	# per-line rewrite and the "did we change anything" test stays simple.
+	: > "$entry.tmp"
+	patched=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in
+			Exec=*)
+				value="${line#Exec=}"
+				new="$(rewrite_exec "$value")"
+				if [ "$new" != "$value" ]; then
+					line="Exec=$new"
+					patched=1
+				fi
+				;;
+		esac
+		printf '%s\n' "$line" >> "$entry.tmp"
+	done < "$system_entry"
+
+	if [ "$patched" = 0 ]; then
+		rm -f "$entry.tmp"
+		say "the packaged steam.desktop has no Exec line ember can rewrite; leaving it alone"
+		say "start Steam with steam-ember, or re-run against a packaged entry that calls steam directly"
+		return 0
+	fi
+
+	# Insert the marker directly after the [Desktop Entry] header, which is where
+	# the uninstaller and a re-run look for it.
+	awk -v marker="$MARKER" '
+		{ print }
+		!done && /^\[Desktop Entry\]$/ { print marker "=true"; done = 1 }
+	' "$entry.tmp" > "$entry.tmp2" && mv -f "$entry.tmp2" "$entry"
+	rm -f "$entry.tmp"
+
 	say "wrote $entry"
 
 	command -v update-desktop-database >/dev/null 2>&1 &&

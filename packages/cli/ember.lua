@@ -43,6 +43,20 @@ local function configDir()
 	return (xdg and xdg ~= "" and xdg or (home() .. "/.config")) .. "/ember"
 end
 
+-- The two directories scripts/install.sh owns: the shim directory on PATH and
+-- the user-level applications directory that shadows the packaged desktop
+-- entry. Defined this early because both the doctor and the uninstaller read
+-- them, and a `local function` below its caller is invisible to it.
+local function binDir()
+	local xdg = os.getenv("XDG_BIN_HOME")
+	return (xdg and xdg ~= "" and xdg or (home() .. "/.local/bin"))
+end
+
+local function appsDir()
+	local xdg = os.getenv("XDG_DATA_HOME")
+	return (xdg and xdg ~= "" and xdg or (home() .. "/.local/share")) .. "/applications"
+end
+
 local function stplugDir() return steamRoot() .. "/config/stplug-in" end
 local function storeDir() return configDir() .. "/manifests" end
 local function depotCacheDir() return steamRoot() .. "/depotcache" end
@@ -516,6 +530,81 @@ local function cmdDoctor()
 		end
 	end
 
+	-- The library can only load into a client that was started through ember.
+	-- On the script installers that means a launcher on PATH and a desktop
+	-- entry; on NixOS it means the wrapped steam package. A client that came up
+	-- without ember is the single most common "ember does nothing" report, and
+	-- the cause is always one of these files rather than the library.
+	local isNixos = isFile("/etc/NIXOS")
+	local patch = "none"
+	do
+		local bin = binDir()
+		local shim = bin .. "/steam"
+		local launcher = bin .. "/steam-ember"
+		local entry = appsDir() .. "/steam.desktop"
+		local tagged = isFile(entry)
+			and trim(sh(("grep -c 'X-Ember' '%s' 2>/dev/null || true"):format(entry))) ~= "0"
+
+		if isNixos then
+			-- The module overrides programs.steam.package, so every launch path
+			-- is covered and there is nothing for the user to wire up.
+			patch = "module"
+		elseif isFile(launcher) then
+			patch = "script"
+		elseif isFile(shim) then
+			patch = "partial"
+		end
+
+		if patch == "script" or patch == "module" then
+			line("launcher", "patched (" .. (patch == "module" and "nixos module" or "steam-ember") .. ")", "ok")
+		elseif patch == "partial" then
+			line("launcher", "~/.local/bin/steam present but steam-ember missing", "warn")
+		else
+			line("launcher", "no ember launcher - launch Steam with steam-ember", "warn")
+		end
+
+		if not isNixos then
+			if tagged then
+				line("desktop entry", "patched", "ok")
+			elseif isFile(entry) then
+				line("desktop entry", "present but not ember's", "info")
+			else
+				line("desktop entry", "missing - menu launches use vanilla Steam", "warn")
+			end
+			-- The shim only wins when its own directory is on PATH ahead of
+			-- the real steam. Distinguish "not on PATH at all" from "on PATH
+			-- but behind", because the fixes differ.
+			--
+			-- Never decide this from two empty strings: a missing readlink (a
+			-- stripped environment, a container) makes both sides resolve to
+			-- "" and would otherwise read as a match.
+			if isFile(shim) then
+				local function resolve(path)
+					if path == "" then return nil end
+					local out = trim(sh(("readlink -f '%s' 2>/dev/null"):format(path)))
+					return out ~= "" and out or nil
+				end
+
+				local pathEntries = {}
+				for dir in (os.getenv("PATH") or ""):gmatch("[^:]+") do
+					pathEntries[dir] = true
+				end
+				local which = trim(sh("command -v steam 2>/dev/null"))
+				local resolvedShim = resolve(shim)
+
+				if not pathEntries[bin] then
+					line("PATH", bin .. " is not on PATH", "warn")
+				elseif which == "" then
+					line("PATH", "no steam on PATH", "warn")
+				elseif which == shim or (resolvedShim and resolve(which) == resolvedShim) then
+					line("PATH", bin .. " wins", "ok")
+				else
+					line("PATH", bin .. " is behind " .. which, "warn")
+				end
+			end
+		end
+	end
+
 	print("")
 	if fails > 0 then
 		print(string.format("%d failure(s), %d warning(s)", fails, warns))
@@ -700,8 +789,80 @@ local function latestVersion()
 	return body:match('"tag_name"%s*:%s*"([^"]+)"') or ""
 end
 
--- Tears ember out of the machine: the imported apps, then the wrapper, desktop
--- entries and shell rc edits, by handing off to the installer's own uninstall.
+-- The launcher files belong to the installer, not to ember's state, so the
+-- teardown has to know which installer wrote them. Two exist and they use
+-- different markers:
+--
+--   scripts/install.sh   Arch/Fedora, user-level shadowing. Writes
+--                        ~/.local/bin/{ember,steam,steam-ember} and a
+--                        ~/.local/share/applications/steam.desktop tagged
+--                        X-Ember-Alternative. It never installs a setup.sh.
+--   setup.sh             the release tarball. Writes the wrapper, patches
+--                        desktop entries with X-Ember-Patched, edits shell rc
+--                        files, and owns its own uninstall.
+--
+-- Telling an install.sh machine to run setup.sh is what leaves Steam launching
+-- through a shim whose target has already been deleted.
+local function refreshDesktopDatabase()
+	if trim(sh("command -v update-desktop-database 2>/dev/null")) ~= "" then
+		ok("update-desktop-database '" .. appsDir() .. "' >/dev/null 2>&1")
+	end
+end
+
+-- Restores the file the installer moved aside, or deletes the one it wrote.
+-- A file without the marker is the user's own and is left alone.
+local function restoreOrRemove(path, marker)
+	if not isFile(path) then return nil end
+	if marker ~= "" and trim(sh(("grep -c '%s' '%s' 2>/dev/null || true"):format(marker, path))) == "0" then
+		return nil
+	end
+	local backup = path .. ".pre-ember"
+	if isFile(backup) then
+		ok(("mv -f '%s' '%s'"):format(backup, path))
+	else
+		ok(("rm -f '%s'"):format(path))
+	end
+	return path
+end
+
+-- Undoes scripts/install.sh's launcher patch: the `steam` shim on PATH, the
+-- steam-ember launcher it forwards to, the `ember` wrapper, and the user-level
+-- desktop entry that shadows the packaged one. Nothing here needs root, which
+-- is the point of that installer — it never touches a package-owned file.
+local function unpatchScriptInstall()
+	local changed = false
+	local bin = binDir()
+
+	if restoreOrRemove(bin .. "/steam", "ember") then changed = true end
+
+	for _, name in ipairs({ "steam-ember", "ember" }) do
+		local path = bin .. "/" .. name
+		if isFile(path) then
+			ok(("rm -f '%s'"):format(path))
+			changed = true
+		end
+	end
+
+	if restoreOrRemove(appsDir() .. "/steam.desktop", "X-Ember-Alternative") then
+		changed = true
+		refreshDesktopDatabase()
+	end
+
+	return changed
+end
+
+-- Which installer owns this machine, by what it left behind. A tarball install
+-- also has an ember-core.so and a VERSION in the data dir, so the script
+-- installer's own marker has to be checked first.
+local function scriptInstallPresent()
+	if isFile(dataDir() .. "/install-flags") then return true end
+	if isFile(binDir() .. "/steam-ember") then return true end
+	if isFile(dataDir() .. "/ember.lua") and isFile(dataDir() .. "/ember-core.so") then return true end
+	return false
+end
+
+-- Tears ember out of the machine: the imported apps, then the launcher files,
+-- then ember's own state.
 -- On NixOS none of that is ember's to remove — the module owns it — so this says
 -- what to do instead of pretending to succeed.
 local function cmdUninstall()
@@ -717,6 +878,13 @@ local function cmdUninstall()
 		return 1
 	end
 
+	print("removing imported apps first ...")
+	cmdRemoveAll()
+	print("")
+
+	-- Tarball layout: setup.sh owns the wrapper, the desktop entries and the
+	-- shell rc edits, and its uninstaller is the only thing that knows how to
+	-- undo all three. Hand off rather than keep a second copy of that logic.
 	local setup = nil
 	for _, candidate in ipairs({
 		dataDir() .. "/setup.sh",
@@ -727,22 +895,39 @@ local function cmdUninstall()
 	end
 
 	if setup then
-		print("removing imported apps first ...")
-		cmdRemoveAll()
-		print("")
-		return sh(("bash '%s' uninstall"):format(setup)) and 0 or 1
+		-- os.execute, not sh(): the installer's own report is the user's only
+		-- account of what it restored, and capturing it shows nothing at all.
+		local ok_run, how, code = os.execute(("bash '%s' uninstall"):format(setup))
+		if ok_run == true then return 0 end
+		if how == "exit" and type(code) == "number" then return code end
+		return 1
 	end
 
-	-- No installer to hand off to (source checkout). Fall back to clearing the
-	-- state ember owns, and say plainly that the rest is manual.
-	print("no setup.sh found; clearing ember's own state only")
-	cmdRemoveAll()
-	ok("rm -rf '" .. configDir() .. "/cache'")
-	ok("rm -rf '" .. configDir() .. "/cloud'")
-	ok("rm -rf '" .. configDir() .. "/ui-agent.log'")
+	if scriptInstallPresent() then
+		if unpatchScriptInstall() then
+			print("removed ember's Steam launcher patch")
+		else
+			print("no launcher patch found to undo")
+		end
+	else
+		-- Neither installer's files are here (a source checkout run from the
+		-- tree). Name what was looked for instead of a script that is not on
+		-- this machine.
+		print("no ember launcher patch found (looked for ~/.local/bin/steam-ember")
+		print("and a tagged steam.desktop); only ember's own state was removed")
+	end
+
+	local data = dataDir()
+	for _, name in ipairs({
+		"ember-core.so", "ember-library-inject.so", "ember.lua", "VERSION",
+		"install-flags", "ember-cdpd", "badge.js", "cache", "cloud", "ui-agent.log",
+	}) do
+		ok(("rm -rf '%s/%s'"):format(data, name))
+	end
+	ok(("rmdir '%s' 2>/dev/null"):format(data))
+
 	print("")
-	print("the wrapper, desktop entries and shell rc edits need the installer:")
-	print("  sh setup.sh uninstall")
+	print("ember is removed. Restart Steam so a running client drops the library.")
 	return 0
 end
 
