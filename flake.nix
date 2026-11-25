@@ -37,22 +37,15 @@
       # The core release a NixOS install downloads instead of compiling.
       #
       # Set this when a version is tagged, so a rebuild substitutes the
-      # published artifact instead of building the core. While the input
-      # tracks a branch that has no release yet, it stays null: pointing it
-      # at a tarball that lacks the feature would install the old core and
-      # report success.
+      # published artifact instead of building the core.
       #
-      # null is also the correct state between tagging a release and pinning
-      # its artifact: the hash cannot be known until CI has built it, and a
-      # stale hash fails the tag's own verify step. `nix build .#core` builds
-      # from source in that window — slower, but it cannot install the wrong
-      # library.
-      coreRelease = {
-        version = "0.7.9";
-        url =
-          "https://github.com/axioncs/ember/releases/download/v0.7.9/ember-v0.7.9-x86_64-linux.tar.gz";
-        sha256 = "e3631c8bc88064b40ac7008cf8ebbbdf08bcbc190125dfaa450ec1b778c55b6b";
-      };
+      # null is the correct state between tagging a release and pinning its
+      # artifact: the hash cannot be known until CI has built it, and a stale
+      # hash fails the tag's own verify step. `nix build .#core` builds from
+      # source in that window — slower, but it cannot install the wrong
+      # library. Set the block immediately after each tag, with the hash the
+      # release workflow printed.
+      coreRelease = null;
     in
     {
       packages = forAllSystems (
@@ -102,7 +95,7 @@
       checks = forAllSystems (pkgs: {
         stplugin = pkgs.stdenv.mkDerivation {
           pname = "ember-test-stplugin";
-          version = "0.2.0";
+          version = "0.8.0-test";
           src = ember-core;
           nativeBuildInputs = [
             pkgs.gnumake

@@ -591,77 +591,47 @@ local function cmdDoctor()
 		end
 	end
 
-	-- The library can only load into a client that was started through ember.
-	-- On the script installers that means a launcher on PATH and a desktop
-	-- entry; on NixOS it means the wrapped steam package. A client that came up
-	-- without ember is the single most common "ember does nothing" report, and
-	-- the cause is always one of these files rather than the library.
-	local isNixos = isFile("/etc/NIXOS")
-	local patch = "none"
+	-- The library loads only into a client started through ember. Two launch
+	-- paths exist and neither shadows the other: `steam`/"Steam" (vanilla) and
+	-- `steam-ember`/"Wired Steam" (ember). So the check is that the launcher is
+	-- reachable and its entry exists -- never that `steam` was hijacked. A shim
+	-- or a patched steam.desktop is now a fault, not a success: it means an
+	-- older install is still redirecting the vanilla client.
 	do
+		local isNixos = isFile("/etc/NIXOS")
 		local bin = binDir()
-		local shim = bin .. "/steam"
-		local launcher = bin .. "/steam-ember"
-		local entry = appsDir() .. "/steam.desktop"
-		local tagged = isFile(entry)
-			and trim(sh(("grep -c 'X-Ember' '%s' 2>/dev/null || true"):format(entry))) ~= "0"
-
-		if isNixos then
-			-- The module overrides programs.steam.package, so every launch path
-			-- is covered and there is nothing for the user to wire up.
-			patch = "module"
-		elseif isFile(launcher) then
-			patch = "script"
-		elseif isFile(shim) then
-			patch = "partial"
+		local wired = appsDir() .. "/wired-steam.desktop"
+		local steamEntry = appsDir() .. "/steam.desktop"
+		local launcher = trim(sh("command -v steam-ember 2>/dev/null"))
+		local source
+		if launcher ~= "" then
+			source = isNixos and "nixos module" or "script installer"
 		end
 
-		if patch == "script" or patch == "module" then
-			line("launcher", "patched (" .. (patch == "module" and "nixos module" or "steam-ember") .. ")", "ok")
-		elseif patch == "partial" then
-			line("launcher", "~/.local/bin/steam present but steam-ember missing", "warn")
+		if source then
+			line("launcher", "steam-ember present (" .. source .. ")", "ok")
+		elseif isNixos then
+			line("launcher", "steam-ember not on PATH - is programs.ember.enable set?", "warn")
 		else
-			line("launcher", "no ember launcher - launch Steam with steam-ember", "warn")
+			line("launcher", "steam-ember not on PATH - re-run the installer", "warn")
 		end
 
 		if not isNixos then
-			if tagged then
-				line("desktop entry", "patched", "ok")
-			elseif isFile(entry) then
-				line("desktop entry", "present but not ember's", "info")
+			if isFile(wired) then
+				line("desktop entry", "Wired Steam present", "ok")
 			else
-				line("desktop entry", "missing - menu launches use vanilla Steam", "warn")
+				line("desktop entry", "Wired Steam missing - menu launches cannot start ember", "warn")
 			end
-			-- The shim only wins when its own directory is on PATH ahead of
-			-- the real steam. Distinguish "not on PATH at all" from "on PATH
-			-- but behind", because the fixes differ.
-			--
-			-- Never decide this from two empty strings: a missing readlink (a
-			-- stripped environment, a container) makes both sides resolve to
-			-- "" and would otherwise read as a match.
-			if isFile(shim) then
-				local function resolve(path)
-					if path == "" then return nil end
-					local out = trim(sh(("readlink -f '%s' 2>/dev/null"):format(path)))
-					return out ~= "" and out or nil
-				end
 
-				local pathEntries = {}
-				for dir in (os.getenv("PATH") or ""):gmatch("[^:]+") do
-					pathEntries[dir] = true
-				end
-				local which = trim(sh("command -v steam 2>/dev/null"))
-				local resolvedShim = resolve(shim)
-
-				if not pathEntries[bin] then
-					line("PATH", bin .. " is not on PATH", "warn")
-				elseif which == "" then
-					line("PATH", "no steam on PATH", "warn")
-				elseif which == shim or (resolvedShim and resolve(which) == resolvedShim) then
-					line("PATH", bin .. " wins", "ok")
-				else
-					line("PATH", bin .. " is behind " .. which, "warn")
-				end
+			-- Legacy residue: an old installer's shim or a patched Steam entry.
+			local legacyShim = isFile(bin .. "/steam")
+				and trim(sh(("grep -c 'ember' '%s' 2>/dev/null || true"):format(bin .. "/steam"))) ~= "0"
+			local legacyEntry = isFile(steamEntry)
+				and trim(sh(("grep -c 'X-Ember' '%s' 2>/dev/null || true"):format(steamEntry))) ~= "0"
+			if legacyShim or legacyEntry then
+				line("steam", "an older install still redirects vanilla Steam - re-run the installer", "warn")
+			else
+				line("steam", "vanilla (untouched)", "ok")
 			end
 		end
 	end
@@ -854,13 +824,12 @@ end
 -- teardown has to know which installer wrote them. Two exist and they use
 -- different markers:
 --
---   scripts/install.sh   Arch/Fedora, user-level shadowing. Writes
---                        ~/.local/bin/{ember,steam,steam-ember} and a
---                        ~/.local/share/applications/steam.desktop tagged
---                        X-Ember-Alternative. It never installs a setup.sh.
---   setup.sh             the release tarball. Writes the wrapper, patches
---                        desktop entries with X-Ember-Patched, edits shell rc
---                        files, and owns its own uninstall.
+--   scripts/install.sh   Arch/Fedora, user-level. Writes ~/.local/bin/{ember,
+--                        steam-ember} and ~/.local/share/applications/
+--                        wired-steam.desktop. Steam's own launchers are never
+--                        touched. It never installs a setup.sh.
+--   setup.sh             the release tarball. Writes the wrapper and its own
+--                        steam-ember launcher, and owns its own uninstall.
 --
 -- Telling an install.sh machine to run setup.sh is what leaves Steam launching
 -- through a shim whose target has already been deleted.
@@ -886,10 +855,12 @@ local function restoreOrRemove(path, marker)
 	return path
 end
 
--- Undoes scripts/install.sh's launcher patch: the `steam` shim on PATH, the
--- steam-ember launcher it forwards to, the `ember` wrapper, and the user-level
--- desktop entry that shadows the packaged one. Nothing here needs root, which
--- is the point of that installer — it never touches a package-owned file.
+-- Undoes scripts/install.sh's launcher files: the steam-ember launcher and the
+-- `ember` wrapper, the Wired Steam entry, and anything an older version left
+-- redirecting vanilla Steam (a ~/.local/bin/steam shim and a patched
+-- steam.desktop, both restored from their .pre-ember backups). Nothing here
+-- needs root, which is the point of that installer — it never touches a
+-- package-owned file.
 local function unpatchScriptInstall()
 	local changed = false
 	local bin = binDir()
@@ -904,7 +875,18 @@ local function unpatchScriptInstall()
 		end
 	end
 
-	if restoreOrRemove(appsDir() .. "/steam.desktop", "X-Ember-Alternative") then
+	-- The entry this installer writes today. It is ember's own file, so no
+	-- marker test is needed: the name is the marker.
+	if isFile(appsDir() .. "/wired-steam.desktop") then
+		ok(("rm -f '%s'"):format(appsDir() .. "/wired-steam.desktop"))
+		changed = true
+		refreshDesktopDatabase()
+	end
+
+	-- Legacy residue from an older install: vanilla Steam was shadowed by a
+	-- user-level steam.desktop and a shim. Both are restored, not left behind,
+	-- or `steam` would keep starting ember after the launcher is gone.
+	if restoreOrRemove(appsDir() .. "/steam.desktop", "X-Ember") then
 		changed = true
 		refreshDesktopDatabase()
 	end
@@ -966,16 +948,16 @@ local function cmdUninstall()
 
 	if scriptInstallPresent() then
 		if unpatchScriptInstall() then
-			print("removed ember's Steam launcher patch")
+			print("removed ember's launchers; Steam's own are untouched")
 		else
-			print("no launcher patch found to undo")
+			print("no ember launcher found to remove")
 		end
 	else
 		-- Neither installer's files are here (a source checkout run from the
 		-- tree). Name what was looked for instead of a script that is not on
 		-- this machine.
-		print("no ember launcher patch found (looked for ~/.local/bin/steam-ember")
-		print("and a tagged steam.desktop); only ember's own state was removed")
+		print("no ember launcher found (looked for ~/.local/bin/steam-ember")
+		print("and wired-steam.desktop); only ember's own state was removed")
 	end
 
 	local data = dataDir()
@@ -1011,9 +993,18 @@ local function cmdUpdate(checkOnly)
 	print(string.format("installed  %s", installed ~= "" and installed or "unknown"))
 	print(string.format("latest     %s", latest))
 
-	if installed == latest then
+	-- A source install is stamped <tag>+source-<sha>: it must never compare
+	-- equal to the release tag, or `ember update` calls it current while it
+	-- runs different code.
+	local fromSource = installed:find("+source-", 1, true) ~= nil
+	local installedTag = installed:gsub("%+source%-.*$", "")
+
+	if not fromSource and installedTag == latest then
 		print("up to date")
 		return 0
+	end
+	if fromSource then
+		print("built from source; a release install replaces it")
 	end
 
 	if checkOnly then

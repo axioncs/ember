@@ -37,8 +37,18 @@ programs.ember.package = ember.packages.${system}.coreSource;
 curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
 ```
 
-That installs the CLI and makes Steam start with ember. It asks about syncing
-saves at the end — see [Saves](#saves).
+That installs the CLI and adds a second launch path; it asks about syncing
+saves at the end — see [Saves](#saves). Steam's own launchers are never
+touched:
+
+| | Launcher | Desktop entry | What it starts |
+|---|---|---|---|
+| Vanilla | `steam` | **Steam** | the distributor's client |
+| ember | `steam-ember` | **Wired Steam** | the same client with ember loaded |
+
+Start **Wired Steam** to play with ember. `steam://` links, autostart and
+anything else that names `steam` keep launching the vanilla client, so ember is
+opt-in per launch.
 
 ## Adding a game
 

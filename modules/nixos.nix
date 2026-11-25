@@ -7,6 +7,76 @@
 }:
 let
   cfg = config.programs.ember;
+
+  # Two launch paths, the same shape as the distro installer:
+  #
+  #   steam       "Steam"        programs.steam.package, untouched
+  #   steam-ember "Wired Steam"  the same client with ember loaded
+  #
+  # So the wrapped derivation is a second FHS environment rather than a
+  # replacement for programs.steam.package. steam:// links, autostart and the
+  # distributor's own entry therefore keep starting the vanilla client, and
+  # ember is opt-in per launch.
+  steamWired = cfg.steamPackage.override (prev: {
+      extraEnv = (prev.extraEnv or { }) // {
+        # The libcurl redirector loads first, then the audit library. Both are
+        # LD_AUDIT objects, never LD_PRELOAD: the loader rejects a preload that
+        # calls into the client, and the core binds exec* through la_symbind64
+        # to rewrite the webhelper's --remote-debugging-port argument.
+        LD_AUDIT = "${cfg.package}/lib/ember/ember-library-inject.so:${cfg.package}/lib/ember/ember-core.so";
+        # Cloud is read by the library from the environment as well as from
+        # config.yaml, so the option wins without rewriting a file the user
+        # owns. The CLI reads the same variables, keeping one source of truth.
+        EMBER_CLOUD = if cfg.cloud then "1" else "0";
+      } // lib.optionalAttrs (cfg.cloudRemote != null) {
+        EMBER_CLOUD_REMOTE = cfg.cloudRemote;
+        EMBER_CLOUD_FOLDER = cfg.cloudFolder;
+      } // lib.optionalAttrs (!cfg.cefDebug) {
+        EMBER_CEF = "0";
+      };
+
+      # PATH is NOT set through extraEnv. That block is emitted as a bare
+      # assignment after nixpkgs' own `export PATH=...`, so an extraEnv PATH
+      # replaces the container's PATH and Steam stops being executable. This
+      # string lands after it and expands $PATH at runtime, so the container's
+      # directories survive.
+      #
+      # The core unpacks manifest archives by shelling out to unzip, gzip and
+      # timeout. Inside the FHS container the only directories on PATH are the
+      # container's own, so a tool installed in the system profile is invisible
+      # even though it exists — which is why manifest import reported unzip
+      # missing on a machine that has it.
+      extraProfile = (prev.extraProfile or "") + ''
+        export PATH="${lib.makeBinPath (with pkgs; [ unzip gzip coreutils ])}:$PATH"
+      '';
+    });
+
+  # The `steam-ember` command and its menu entry. Exec names the launcher on
+  # PATH rather than the store path so the entry survives a rebuild that moves
+  # the derivation.
+  emberLauncher = pkgs.runCommand "steam-ember-launcher" { } ''
+    mkdir -p $out/bin $out/share/applications
+    cat > $out/bin/steam-ember <<'EOF'
+    #!/bin/sh
+    exec ${steamWired}/bin/steam "$@"
+    EOF
+    chmod 755 $out/bin/steam-ember
+
+    cat > $out/share/applications/wired-steam.desktop <<'EOF'
+    [Desktop Entry]
+    Type=Application
+    Name=Wired Steam
+    GenericName=Game Store
+    Comment=Steam with ember loaded, for games ember added
+    Exec=steam-ember %U
+    Icon=steam
+    Terminal=false
+    Categories=Game;
+    StartupWMClass=Steam
+    MimeType=x-scheme-handler/steam;x-scheme-handler/steamlink;
+    EOF
+    chmod 644 $out/share/applications/wired-steam.desktop
+  '';
 in
 {
   options.programs.ember = {
@@ -138,7 +208,7 @@ in
       }
     ];
 
-    environment.systemPackages = [ cfg.cli ];
+    environment.systemPackages = [ cfg.cli emberLauncher ];
 
     # The badge watcher is a user unit, not a system one: it needs the user's
     # curl, pgrep and rclone, and it must die with the graphical session. The
@@ -193,45 +263,9 @@ in
       EMBER_CLOUD_FOLDER = cfg.cloudFolder;
     };
 
-    # extraEnv lands in the FHS profile, which the container init sources. Setting
-    # it there rather than in the global environment keeps it scoped to Steam and
-    # lets it override any inherited LD_AUDIT.
-    #
-    # Function form on purpose: an attribute-set override replaces extraEnv
-    # wholesale, which would drop whatever another Steam wrapper put there.
-    # Applying the function to the previous arguments merges instead.
-    programs.steam.package = cfg.steamPackage.override (prev: {
-      extraEnv = (prev.extraEnv or { }) // {
-        # The libcurl redirector loads first, then the audit library. Both are
-        # LD_AUDIT objects, never LD_PRELOAD: the loader rejects a preload that
-        # calls into the client, and the core binds exec* through la_symbind64
-        # to rewrite the webhelper's --remote-debugging-port argument.
-        LD_AUDIT = "${cfg.package}/lib/ember/ember-library-inject.so:${cfg.package}/lib/ember/ember-core.so";
-        # Cloud is read by the library from the environment as well as from
-        # config.yaml, so the option wins without rewriting a file the user
-        # owns. The CLI reads the same variables, keeping one source of truth.
-        EMBER_CLOUD = if cfg.cloud then "1" else "0";
-      } // lib.optionalAttrs (cfg.cloudRemote != null) {
-        EMBER_CLOUD_REMOTE = cfg.cloudRemote;
-        EMBER_CLOUD_FOLDER = cfg.cloudFolder;
-      } // lib.optionalAttrs (!cfg.cefDebug) {
-        EMBER_CEF = "0";
-      };
-
-      # PATH is NOT set through extraEnv. That block is emitted as a bare
-      # assignment after nixpkgs' own `export PATH=...`, so an extraEnv PATH
-      # replaces the container's PATH and Steam stops being executable. This
-      # string lands after it and expands $PATH at runtime, so the container's
-      # directories survive.
-      #
-      # The core unpacks manifest archives by shelling out to unzip, gzip and
-      # timeout. Inside the FHS container the only directories on PATH are the
-      # container's own, so a tool installed in the system profile is invisible
-      # even though it exists — which is why manifest import reported unzip
-      # missing on a machine that has it.
-      extraProfile = (prev.extraProfile or "") + ''
-        export PATH="${lib.makeBinPath (with pkgs; [ unzip gzip coreutils ])}:$PATH"
-      '';
-    });
+    # programs.steam.package is deliberately left alone: `steam` and the
+    # distributor's "Steam" entry must keep starting the vanilla client. The
+    # wrapped environment lives in steamWired and is only reachable through
+    # `steam-ember` / "Wired Steam".
   };
 }

@@ -17,6 +17,14 @@ jobs:
           sh -n scripts/install.sh
           sh -n scripts/build-release.sh
 
+      # The installer's launch model: steam/Steam untouched, steam-ember plus a
+      # Wired Steam entry, legacy shim restored on upgrade, clean uninstall.
+      - name: installer functional test
+        run: |
+          git clone --depth 1 --branch "${EMBER_CORE_REF:-ember}" \
+            https://github.com/axioncs/ember-core ember-core
+          EMBER_CORE_SRC="$PWD/ember-core" sh scripts/test-install.sh
+
       # The unit library renders the badge watcher and cloud-push timer. It
       # lives in ember-core and is what the distro installer sources, so the
       # test runs from the core checkout rather than this repo.

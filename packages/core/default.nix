@@ -22,7 +22,7 @@
 # soname at runtime, from the container that already has them. So the artifact
 # is installed as-is and nothing is patched.
 let
-  targeted = if release != null then release.version else "0.3.0";
+  targeted = if release != null then release.version else "0.8.0-test";
 
   common = {
     pname = "ember-core";

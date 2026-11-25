@@ -4,14 +4,19 @@
 #   curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
 #
 # Flags:
-#   --no-steam-patch  install ember but leave Steam's launchers alone
-#   --no-restart      do not close and relaunch Steam after installing
-#   --from-source     build the library here instead of downloading a release
-#   --uninstall       remove everything this script installed
+#   --no-desktop-entry  install ember but do not add the "Wired Steam" entry
+#   --no-restart        do not close and relaunch Steam after installing
+#   --from-source       build the library here instead of downloading a release
+#   --uninstall         remove everything this script installed
 #
-# By default Steam is patched so every launch starts with ember: a user-level
-# steam.desktop that shadows the packaged one, and a `steam` shim on PATH. Both
-# carry a marker line and are undone by --uninstall.
+# Two launch paths exist side by side and neither shadows the other:
+#
+#   steam       / "Steam"        the distributor's client, untouched
+#   steam-ember / "Wired Steam"  the same client with ember loaded
+#
+# Nothing here rewrites a packaged steam.desktop or puts a `steam` shim on
+# PATH. An install made by an older version is un-patched instead: its shim is
+# deleted and its steam.desktop restored from <name>.pre-ember.
 #
 # NixOS is not supported here; use the flake module instead.
 
@@ -24,13 +29,16 @@ INSTALL_CMD="curl -fsSL ${RAW_CLI}/main/scripts/install.sh"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ember"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-PATCH=1
+ENTRY=1
 RESTART=1
 UNINSTALL=0
 FROM_SOURCE="${EMBER_FROM_SOURCE:-0}"
 # Test hooks: the OS check and the packaged desktop entry are read from these
 # when set, so the install path can be exercised without Arch or Fedora.
 OS_RELEASE="${EMBER_OS_RELEASE:-/etc/os-release}"
+# Test hook: skip the build-dependency probe, which would otherwise prompt for
+# sudo on a sandbox that has stub tools.
+CHECK_DEPS="${EMBER_CHECK_DEPS:-1}"
 MARKER="X-Ember-Alternative"
 
 
@@ -45,14 +53,14 @@ ember installer for Arch and Fedora.
   curl -fsSL https://raw.githubusercontent.com/axioncs/ember/main/scripts/install.sh | sh
 
 Flags:
-  --no-steam-patch  install ember but leave Steam's launchers alone
-  --no-restart      do not close and relaunch Steam after installing
-  --from-source     build the library here instead of downloading a release
-  --uninstall       remove everything this script installed
+  --no-desktop-entry  install ember but do not add the "Wired Steam" entry
+  --no-restart        do not close and relaunch Steam after installing
+  --from-source       build the library here instead of downloading a release
+  --uninstall         remove everything this script installed
 
-By default Steam is patched so every launch starts with ember: a user-level
-steam.desktop that shadows the packaged one, and a `steam` shim on PATH. Both
-carry a marker line and are restored by --uninstall.
+Steam is never patched. The distributor's `steam` and its "Steam" entry keep
+starting the vanilla client; ember adds `steam-ember` and a "Wired Steam"
+entry beside them.
 
 NixOS is not supported here; use the flake module instead.
 EOF
@@ -60,8 +68,12 @@ EOF
 
 for arg in "$@"; do
 	case "$arg" in
-		--desktop) PATCH=1 ;;
-		--no-steam-patch|--no-desktop) PATCH=0 ;;
+		--desktop) ENTRY=1 ;;
+		--no-desktop-entry|--no-desktop) ENTRY=0 ;;
+		# Old name, kept so an `install-flags` file written by a previous
+		# version still replays: it no longer skips a Steam patch (there is
+		# none), it skips the Wired Steam entry.
+		--no-steam-patch) ENTRY=0 ;;
 		--no-restart) RESTART=0 ;;
 		--from-source) FROM_SOURCE=1 ;;
 		--uninstall) UNINSTALL=1 ;;
@@ -73,9 +85,14 @@ done
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf 'ember: %s\n' "$*" >&2; exit 1; }
 
-# Undoes only what carries ember's markers, restoring anything that was kept
-# beside it. Used by --uninstall and by an install that opts out of patching.
-unpatch_steam() {
+# Removes what an older installer did to Steam and this installer's own entry.
+# Used by --uninstall and by any install that finds a legacy patch in place.
+#
+# The legacy shape was a ~/.local/bin/steam shim forwarding to steam-ember and
+# a user-level steam.desktop whose Exec= had been rewritten in place. Both are
+# undone here so the distributor's launch paths come back; a machine that never
+# had them is unaffected and nothing is reported.
+remove_launchers() {
 	touched=0
 	if [ -f "$BIN_DIR/steam" ] && grep -q 'ember' "$BIN_DIR/steam" 2>/dev/null; then
 		rm -f "$BIN_DIR/steam"
@@ -96,7 +113,13 @@ unpatch_steam() {
 		touched=1
 	fi
 
-	[ "$touched" = 1 ] && say "removed the Steam patch"
+	if [ -f "$APPS_DIR/wired-steam.desktop" ]; then
+		rm -f "$APPS_DIR/wired-steam.desktop"
+		touched=1
+	fi
+	[ -f "$entry.pre-ember" ] && rm -f "$entry.pre-ember"
+
+	[ "$touched" = 1 ] && say "removed ember's launchers (Steam's own are untouched)"
 	return 0
 }
 
@@ -136,6 +159,34 @@ install_user_units() {
 	# Type=simple + Restart=on-failure: the watcher blocks while Steam runs and
 	# exits when it does, which is a normal shutdown, not a failure. Restart=
 	# always would turn that into a restart loop.
+	# The cloud-push service/timer are opt-in (a timer running `rclone sync`
+	# against an unconfigured remote writes a journal entry every interval), so
+	# they are installed but never enabled here. Arch/Fedora installs need them
+	# as much as the NixOS module's machine does.
+	cat > "$UNIT_DIR/ember-cloud-push.service" <<EOF2
+[Unit]
+Description=Push ember cloud saves to the configured rclone remote
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/ember cloud push
+TimeoutStartSec=600
+Nice=10
+IOSchedulingClass=idle
+EOF2
+	cat > "$UNIT_DIR/ember-cloud-push.timer" <<EOF2
+[Unit]
+Description=Periodic ember cloud save push
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=ember-cloud-push.service
+
+[Install]
+WantedBy=timers.target
+EOF2
 	cat > "$UNIT_DIR/ember-ui-watch.service" <<EOF
 [Unit]
 Description=ember store-page badge watcher
@@ -168,7 +219,7 @@ EOF
 remove_user_units() {
 	command -v systemctl >/dev/null 2>&1 &&
 		systemctl --user disable --now ember-ui-watch.service >/dev/null 2>&1 || true
-	rm -f "$UNIT_DIR/ember-ui-watch.service"
+	rm -f "$UNIT_DIR/ember-ui-watch.service" "$UNIT_DIR/ember-cloud-push.service" "$UNIT_DIR/ember-cloud-push.timer"
 	command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload >/dev/null 2>&1 || true
 	return 0
 }
@@ -183,7 +234,7 @@ if [ "$UNINSTALL" = 1 ]; then
 	rm -f "$BIN_DIR/steam-ember" "$BIN_DIR/ember"
 	rmdir "$DATA_DIR" 2>/dev/null || true
 
-	unpatch_steam
+	remove_launchers
 
 	say "done"
 	exit 0
@@ -254,12 +305,14 @@ prebuilt() {
 # Builds the library from source and stages it with the CLI for this tag.
 from_source() {
 	missing=""
+	if [ "$CHECK_DEPS" = 1 ]; then
 	command -v g++ >/dev/null 2>&1 || missing="$missing gcc"
 	command -v make >/dev/null 2>&1 || missing="$missing make"
 	command -v pkg-config >/dev/null 2>&1 || missing="$missing pkg-config"
 	pkg-config --exists dbus-1 2>/dev/null || missing="$missing dbus"
 	pkg-config --exists libcurl 2>/dev/null || missing="$missing curl"
 	[ -f /usr/include/luajit-2.1/lua.hpp ] || missing="$missing luajit"
+	fi
 
 	if [ -n "$missing" ]; then
 		case "$FAMILY" in
@@ -299,7 +352,17 @@ else
 	from_source
 fi
 
-[ -f "$stage/VERSION" ] || printf '%s\n' "${EMBER_VERSION:-unknown}" > "$stage/VERSION"
+# A source build records its commit. Without it, `ember update` compares the
+# latest tag with the latest tag and calls a source install current forever.
+if [ ! -f "$stage/VERSION" ]; then
+	rev=""
+	[ -n "${EMBER_SRC:-}" ] && rev="$(git -C "$EMBER_SRC" rev-parse HEAD 2>/dev/null || true)"
+	if [ -n "$rev" ]; then
+		printf '%s+source-%s\n' "${EMBER_VERSION:-unknown}" "$(printf '%s' "$rev" | cut -c1-7)" > "$stage/VERSION"
+	else
+		printf '%s\n' "${EMBER_VERSION:-unknown}" > "$stage/VERSION"
+	fi
+fi
 
 say "installing to $DATA_DIR"
 mkdir -p "$DATA_DIR" "$BIN_DIR"
@@ -319,13 +382,13 @@ exec lua "$DATA_DIR/ember.lua" "\$@"
 EOF
 chmod 755 "$BIN_DIR/ember"
 
-# The launcher resolves the distributor's steam itself, skipping this install's
-# own shims, so a `steam` shim on PATH can exec it without recursing.
+# The launcher resolves the distributor's steam itself, never another ember
+# executable, so `steam-ember` can never re-enter itself.
 cat > "$BIN_DIR/steam-ember" <<EOF
 #!/bin/sh
 # generated by ember's install.sh; removed by --uninstall
 self="\$(readlink -f "\$0")"
-shim="\$(readlink -f "$BIN_DIR/steam" 2>/dev/null || true)"
+legacy_shim="\$(readlink -f "$BIN_DIR/steam" 2>/dev/null || true)"
 real=""
 old_ifs=\$IFS
 IFS=:
@@ -334,7 +397,7 @@ for dir in \$PATH; do
 	resolved="\$(readlink -f "\$dir/steam" 2>/dev/null || true)"
 	[ -n "\$resolved" ] || continue
 	[ "\$resolved" = "\$self" ] && continue
-	[ -n "\$shim" ] && [ "\$resolved" = "\$shim" ] && continue
+	[ -n "\$legacy_shim" ] && [ "\$resolved" = "\$legacy_shim" ] && continue
 	real="\$dir/steam"
 	break
 done
@@ -353,169 +416,52 @@ exec env -u LD_AUDIT "\$real" "\$@"
 EOF
 chmod 755 "$BIN_DIR/steam-ember"
 
-# Steam itself, as typed in a shell or started by a session that ignores desktop
-# files. It only forwards: the launcher owns the resolution and the environment.
-patch_steam_command() {
-	if [ -e "$BIN_DIR/steam" ] && ! grep -q 'ember' "$BIN_DIR/steam" 2>/dev/null; then
-		mv -f "$BIN_DIR/steam" "$BIN_DIR/steam.pre-ember"
-		say "kept the existing $BIN_DIR/steam as steam.pre-ember"
-	fi
-	if [ ! -e "$BIN_DIR/steam" ]; then
-		cat > "$BIN_DIR/steam" <<EOF
-#!/bin/sh
-# generated by ember's install.sh; removed by --uninstall
-exec "$BIN_DIR/steam-ember" "\$@"
-EOF
-		chmod 755 "$BIN_DIR/steam"
-	fi
-	say "wrote $BIN_DIR/steam"
-	case ":$PATH:" in
-		*":$BIN_DIR:"*) : ;;
-		*) say "note: $BIN_DIR is not on PATH, so \`steam\` keeps starting the unpatched client" ;;
-	esac
-}
-
-# Rewrites an Exec= value so it runs the launcher instead of steam, keeping the
-# field codes and any arguments.
-#
-# sed is wrong here: `Exec=env VAR=1 steam %U` would become
-# `Exec=<launcher> VAR=1 steam %U`, which passes a bogus `VAR=1 steam` to Steam
-# instead of setting the variable. Tokenize instead: keep a leading `env` and its
-# assignments, replace the first steam token, drop the rest. Anything that is not
-# an env-prefixed or plain steam command is returned unchanged so an entry we do
-# not understand is never rewritten into something broken.
-rewrite_exec() {
-	_log=""
-	printf '%s\n' "$1" | awk -v launcher="$BIN_DIR/steam-ember" '
-		{
-			text = $0
-			out = ""
-			# Split into tokens on unquoted whitespace, honouring the
-			# backslash escapes the desktop-entry spec allows.
-			n = 0
-			while (length(text) > 0) {
-				tok = ""
-				while (length(text) > 0) {
-					c = substr(text, 1, 1)
-					if (c == "\\" && length(text) > 1) { tok = tok substr(text, 1, 2); text = substr(text, 3); continue }
-					if (c == " " || c == "	") break
-					tok = tok c; text = substr(text, 2)
-				}
-				while (length(text) > 0 && (substr(text,1,1) == " " || substr(text,1,1) == "	")) text = substr(text, 2)
-				if (tok != "") { n++; t[n] = tok }
-				if (length(text) == 0) break
-			}
-			if (n == 0) { print; exit }
-
-			i = 1
-			env_prefix = ""
-			assignments = ""
-			if (t[i] == "env") {
-				i++
-				env_prefix = "env"
-				while (i <= n && t[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-					assignments = assignments " " t[i]
-					i++
-				}
-				if (i > n) { print; exit }
-			}
-
-			base = t[i]
-			sub(/.*\//, "", base)
-			if (base != "steam") { print; exit }
-
-			# `env` must stay in front of its assignments, so the wrapper is
-			# inserted after them rather than at the head of the line.
-			if (env_prefix == "") {
-				printf "%s", launcher
-			} else {
-				printf "%s%s %s", env_prefix, assignments, launcher
-			}
-			for (j = i + 1; j <= n; j++) printf " %s", t[j]
-			printf "\n"
-		}
-	'
-}
-
-# The desktop entry is the path a dock, the applications menu and steam:// links
-# take. A user-level file with the same name shadows the packaged one, so no
-# root and no pacman-managed file is touched.
-patch_steam_entry() {
-	entry="$APPS_DIR/steam.desktop"
-	system_entry="${EMBER_STEAM_DESKTOP:-}"
-	if [ -z "$system_entry" ]; then
-		for candidate in /usr/share/applications/steam.desktop /usr/local/share/applications/steam.desktop; do
-			[ -f "$candidate" ] && system_entry="$candidate" && break
-		done
-	fi
-
-	if [ -z "$system_entry" ] || [ ! -f "$system_entry" ]; then
-		say "no packaged steam.desktop found; skipping it (flatpak Steam cannot be hooked this way)"
-		return 0
-	fi
-
+# A second desktop entry beside the packaged one, with its own file name, so the
+# "Steam" entry the distributor ships keeps pointing at the vanilla client and
+# `steam://` links keep working exactly as before. Exec names the launcher on
+# PATH rather than an absolute path: the launcher is the same file, and a name
+# survives a changed XDG_BIN_HOME.
+install_wired_entry() {
 	mkdir -p "$APPS_DIR"
-	if [ -f "$entry" ] && ! grep -q "$MARKER" "$entry" 2>/dev/null; then
-		cp -f "$entry" "$entry.pre-ember"
-		say "kept the existing override as $entry.pre-ember"
-	fi
-
-	# Rewrite Exec= lines in place, one at a time, so each replacement is the
-	# tokenizer's own output rather than a pattern match over the whole file.
-	# A line that does not tokenize to a steam command keeps its original text.
-	# The marker is inserted by a separate pass, so the Exec loop stays a pure
-	# per-line rewrite and the "did we change anything" test stays simple.
-	: > "$entry.tmp"
-	patched=0
-	while IFS= read -r line || [ -n "$line" ]; do
-		case "$line" in
-			Exec=*)
-				value="${line#Exec=}"
-				new="$(rewrite_exec "$value")"
-				if [ "$new" != "$value" ]; then
-					line="Exec=$new"
-					patched=1
-				fi
-				;;
-		esac
-		printf '%s\n' "$line" >> "$entry.tmp"
-	done < "$system_entry"
-
-	if [ "$patched" = 0 ]; then
-		rm -f "$entry.tmp"
-		say "the packaged steam.desktop has no Exec line ember can rewrite; leaving it alone"
-		say "start Steam with steam-ember, or re-run against a packaged entry that calls steam directly"
-		return 0
-	fi
-
-	# Insert the marker directly after the [Desktop Entry] header, which is where
-	# the uninstaller and a re-run look for it.
-	awk -v marker="$MARKER" '
-		{ print }
-		!done && /^\[Desktop Entry\]$/ { print marker "=true"; done = 1 }
-	' "$entry.tmp" > "$entry.tmp2" && mv -f "$entry.tmp2" "$entry"
-	rm -f "$entry.tmp"
-
+	entry="$APPS_DIR/wired-steam.desktop"
+	cat > "$entry" <<EOF
+[Desktop Entry]
+$MARKER=true
+Type=Application
+Name=Wired Steam
+GenericName=Game Store
+Comment=Steam with ember loaded, for games ember added
+Exec=steam-ember %U
+Icon=steam
+Terminal=false
+Categories=Game;
+StartupWMClass=Steam
+EOF
+	chmod 644 "$entry"
 	say "wrote $entry"
 
 	command -v update-desktop-database >/dev/null 2>&1 &&
 		update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
 }
 
-if [ "$PATCH" = 1 ]; then
-	patch_steam_command
-	patch_steam_entry
+if [ "$ENTRY" = 1 ]; then
+	# Undo an older install's shim and rewritten steam.desktop first, so an
+	# upgrade leaves exactly one launch model: vanilla Steam plus Wired Steam.
+	remove_launchers
+	install_wired_entry
+	say "Steam's own launchers are untouched; start Wired Steam for ember"
 	: > "$DATA_DIR/install-flags"
 else
-	unpatch_steam
-	say "leaving Steam alone (--no-steam-patch)"
-	# `ember update` replays this, so an update cannot turn the patch back on.
-	printf '%s\n' '--no-steam-patch' > "$DATA_DIR/install-flags"
+	remove_launchers
+	say "skipping the Wired Steam entry (--no-desktop-entry)"
+	# `ember update` replays this, so an update cannot add it back.
+	printf '%s\n' '--no-desktop-entry' > "$DATA_DIR/install-flags"
 fi
 
+
 # The badge is a separate process from the library, so it is installed whether or
-# not Steam's launchers were patched: --no-steam-patch is about launch paths, not
-# about turning the UI layer off.
+# not the Wired Steam entry was written: --no-desktop-entry is about the launch
+# path, not about turning the UI layer off.
 install_user_units
 
 # A running client keeps the library that was loaded at its start, so a fresh
@@ -642,19 +588,16 @@ if [ "$UNINSTALL" = 0 ]; then
 	setup_cloud
 fi
 
-if [ "$PATCH" = 1 ] && [ "$RESTART" = 1 ]; then
+if [ "$ENTRY" = 1 ] && [ "$RESTART" = 1 ]; then
 	restart_steam
-elif [ "$PATCH" = 1 ]; then
+elif [ "$ENTRY" = 1 ]; then
 	say "start Steam again to load ember (--no-restart)"
 fi
 
 say "done"
 printf '\n  library:  %s\n  cli:      %s\n  launcher: %s\n\n' \
 	"$DATA_DIR/ember-core.so" "$BIN_DIR/ember" "$BIN_DIR/steam-ember"
-if [ "$PATCH" = 1 ]; then
-	printf 'Steam now starts with ember from the desktop entry and from `steam`.\n'
-	printf 'Undo with: %s | sh -s -- --uninstall\n' "$INSTALL_CMD"
-else
-	printf 'Launch Steam with `steam-ember`; re-run without --no-steam-patch to make it the default.\n'
-fi
+printf '`steam` and the "Steam" entry still start the vanilla client.\n'
+printf 'Start the "Wired Steam" entry (or `steam-ember`) to play with ember.\n'
+printf 'Undo with: %s | sh -s -- --uninstall\n' "$INSTALL_CMD"
 printf 'Then: ember doctor\n'
