@@ -25,7 +25,27 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # The core lives in its own repo. A tag carries the release's purpose in
+      # its name, so the two tags move together: v0.8.0-test in ember is built
+      # against v0.8.0-test in ember-core. Fall back to the branch when that
+      # tag does not exist, and fail loudly rather than shipping another tag's
+      # library.
+      - name: resolve the core ref
+        id: core
+        run: |
+          set -eu
+          ref="${GITHUB_REF_NAME}"
+          if git ls-remote --tags --exit-code \
+               https://github.com/axioncs/ember-core "refs/tags/${ref}" >/dev/null 2>&1; then
+            echo "core_ref=${ref}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ember-core has no tag ${ref}; building the ember branch"
+            echo "core_ref=ember" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: build and package
+        env:
+          EMBER_CORE_REF: ${{ steps.core.outputs.core_ref }}
         run: sh scripts/build-release.sh "${GITHUB_REF_NAME}"
 
       - name: verify the pinned sha256 matches
