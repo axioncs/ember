@@ -67,10 +67,21 @@ EOF
 cat > "$stub/make" <<'EOF'
 #!/bin/sh
 # The real Makefile builds the two libraries; the sandbox only needs the files.
-for arg in "$@"; do :; done
-mkdir -p bin
-printf 'stub' > bin/ember-core.so
-printf 'stub' > bin/ember-library-inject.so
+# install.sh invokes make with -C <src>, so write the stubs into that directory
+# rather than the caller's cwd.
+dir="."
+prev=""
+for arg in "$@"; do
+	if [ "$prev" = "-C" ]; then
+		dir="$arg"
+		prev=""
+		continue
+	fi
+	if [ "$arg" = "-C" ]; then prev="$arg"; fi
+done
+mkdir -p "$dir/bin"
+printf 'stub' > "$dir/bin/ember-core.so"
+printf 'stub' > "$dir/bin/ember-library-inject.so"
 exit 0
 EOF
 chmod 755 "$stub"/*
@@ -103,8 +114,14 @@ export EMBER_FROM_SOURCE=1
 export EMBER_CHECK_DEPS=0
 
 run_install() {
-	sh "$repo/scripts/install.sh" --from-source --no-restart "$@" \
-		>"$work/install.log" 2>&1
+	if sh "$repo/scripts/install.sh" --from-source --no-restart "$@" \
+		>"$work/install.log" 2>&1; then
+		return 0
+	fi
+	# set -e exits before the caller can print the log; make the failure readable.
+	printf '\n--- install log (failed) ---\n' >&2
+	cat "$work/install.log" >&2
+	return 1
 }
 
 # --- first install ----------------------------------------------------------

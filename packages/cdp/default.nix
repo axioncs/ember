@@ -5,7 +5,7 @@
 
 stdenv.mkDerivation {
   pname = "ember-cdp";
-  version = "0.8.0-test";
+  version = "0.8.0";
 
   src = ./.;
   dontConfigure = true;

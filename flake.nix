@@ -97,7 +97,7 @@
       checks = forAllSystems (pkgs: {
         cloudstorePut = pkgs.stdenv.mkDerivation {
           pname = "ember-test-cloudstore-put";
-          version = "0.8.0-test";
+          version = "0.8.0";
           src = ember-core;
           nativeBuildInputs = [
             pkgs.gnumake
@@ -108,7 +108,7 @@
         };
         stplugin = pkgs.stdenv.mkDerivation {
           pname = "ember-test-stplugin";
-          version = "0.8.0-test";
+          version = "0.8.0";
           src = ember-core;
           nativeBuildInputs = [
             pkgs.gnumake
