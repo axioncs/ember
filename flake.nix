@@ -45,9 +45,12 @@
       # source in that window — slower, but it cannot install the wrong
       # library. Set the block immediately after each tag, with the hash the
       # release workflow printed.
-      # Temporary while the unchanged-PUT fix has no published artifact:
-      # build from the pinned source so a rebuild actually carries it.
-      coreRelease = null;
+      coreRelease = {
+        version = "0.8.0";
+        url =
+          "https://github.com/axioncs/ember/releases/download/v0.8.0/ember-v0.8.0-x86_64-linux.tar.gz";
+        sha256 = "3b5c1d41af64fa397964aa935845556e1a06a49b9865668ec6d6153f820a84a7";
+      };
     in
     {
       packages = forAllSystems (
