@@ -45,12 +45,9 @@
       # source in that window — slower, but it cannot install the wrong
       # library. Set the block immediately after each tag, with the hash the
       # release workflow printed.
-      coreRelease = {
-        version = "0.8.0-test";
-        url =
-          "https://github.com/axioncs/ember/releases/download/v0.8.0-test/ember-v0.8.0-test-x86_64-linux.tar.gz";
-        sha256 = "4cec4fd7c10dcafe30e180221add02e7c53042587d8a3b0782b88716797f1960";
-      };
+      # Temporary while the unchanged-PUT fix has no published artifact:
+      # build from the pinned source so a rebuild actually carries it.
+      coreRelease = null;
     in
     {
       packages = forAllSystems (
@@ -98,6 +95,17 @@
       nixosModules.default = import ./modules/nixos.nix { inherit self; };
 
       checks = forAllSystems (pkgs: {
+        cloudstorePut = pkgs.stdenv.mkDerivation {
+          pname = "ember-test-cloudstore-put";
+          version = "0.8.0-test";
+          src = ember-core;
+          nativeBuildInputs = [
+            pkgs.gnumake
+            pkgs.gcc
+          ];
+          buildPhase = "make test-cloudstore-put";
+          installPhase = "mkdir -p $out && touch $out/passed";
+        };
         stplugin = pkgs.stdenv.mkDerivation {
           pname = "ember-test-stplugin";
           version = "0.8.0-test";
