@@ -45,7 +45,12 @@
       # source in that window — slower, but it cannot install the wrong
       # library. Set the block immediately after each tag, with the hash the
       # release workflow printed.
-      coreRelease = null;
+      coreRelease = {
+        version = "0.8.0-test";
+        url =
+          "https://github.com/axioncs/ember/releases/download/v0.8.0-test/ember-v0.8.0-test-x86_64-linux.tar.gz";
+        sha256 = "4cec4fd7c10dcafe30e180221add02e7c53042587d8a3b0782b88716797f1960";
+      };
     in
     {
       packages = forAllSystems (
